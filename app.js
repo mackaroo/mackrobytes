@@ -7,7 +7,7 @@ const PLAT = { ebay: "eBay", depop: "Depop", fb: "FB Marketplace" };
 const CONDITIONS = ["New","New with tags","New without tags","New (other)","Like new","Used – excellent","Used – good","Used – fair","For parts / not working"];
 const DEFAULTS = {
   shopName: "MackroBytes", fbName: "", zip: "48386", city: "White Lake, MI", handlingDays: 1,
-  ebayFvfPct: 13.6, ebayOrderFeeHigh: 0.40, ebayOrderFeeLow: 0.30, salesTaxPct: 6, ebayAdPct: 0,
+  ebayFvfPct: 13.6, ebayOrderFeeHigh: 0.40, ebayOrderFeeLow: 0.30, salesTaxPct: 6, buyTaxPct: 6, ebayAdPct: 0,
   depopPct: 3.3, depopFixed: 0.45, depopBoostPct: 0,
   fbShipPct: 10, fbShipMin: 0.80,
   pkgEnvelope: 0.10, pkgPoly: 0.15, pkgBubble: 0.40, pkgBox: 0.75,
@@ -519,7 +519,7 @@ const VIEWS = {
     <section class="card"><h2>Claude</h2>
       <p class="small muted">AI buttons give you a prompt to copy. Paste it into the Claude app (attach the item's photos when it asks), then paste Claude's reply back here. It's free and uses your own Claude plan.</p></section>
     <section class="card"><h2>Fees</h2><p class="small muted">Check these against each platform's current fee page now and then. They change.</p>
-      <div class="eyebrow">eBay</div><div class="grid2">${f("ebayFvfPct", "Final value fee %", "number", "0.01")}${f("salesTaxPct", "Avg sales tax % (fee base)", "number", "0.1")}${f("ebayOrderFeeHigh", "Per-order fee (> $10)", "number", "0.01")}${f("ebayOrderFeeLow", "Per-order fee (≤ $10)", "number", "0.01")}${f("ebayAdPct", "Promoted listings %", "number", "0.1")}</div>
+      <div class="eyebrow">eBay</div><div class="grid2">${f("ebayFvfPct", "Final value fee %", "number", "0.01")}${f("salesTaxPct", "Avg sales tax % (fee base)", "number", "0.1")}${f("buyTaxPct", "Tax added to what you paid %", "number", "0.1")}${f("ebayOrderFeeHigh", "Per-order fee (> $10)", "number", "0.01")}${f("ebayOrderFeeLow", "Per-order fee (≤ $10)", "number", "0.01")}${f("ebayAdPct", "Promoted listings %", "number", "0.1")}</div>
       <div class="eyebrow">Depop</div><div class="grid2">${f("depopPct", "Payment processing %", "number", "0.01")}${f("depopFixed", "Processing fixed fee", "number", "0.01")}${f("depopBoostPct", "Boost fee % (0 if not boosting)", "number", "0.1")}</div>
       <div class="eyebrow">FB Marketplace (shipped orders)</div><div class="grid2">${f("fbShipPct", "Selling fee %", "number", "0.1")}${f("fbShipMin", "Minimum fee", "number", "0.01")}</div></section>
     <section class="card"><h2>Packaging cost per order</h2><div class="grid2">${f("pkgEnvelope", "Envelope / toploader", "number", "0.01")}${f("pkgPoly", "Poly mailer", "number", "0.01")}${f("pkgBubble", "Bubble mailer", "number", "0.01")}${f("pkgBox", "Box + padding", "number", "0.01")}</div></section>
@@ -805,7 +805,7 @@ function renderDetail() {
       ${lookupInfoHTML(it)}
       ${fld(it, "condNotes", "Flaws & condition notes", { area: true, ph: "Scratches, missing parts, tested and working?" })}
       ${fld(it, "included", "What's included", { ph: "Charger, box, manual…" })}
-      <div class="grid4">${fld(it, "cost", "Your cost $", { num: 1 })}${fld(it, "weightOz", "Weight (oz)", { num: 1 })}${fld(it, "dims.l", "L (in)", { num: 1 })}${fld(it, "dims.w", "W (in)", { num: 1 })}</div>
+      <div class="grid4">${fld(it.costPre == null && it.cost != null ? { ...it, costPre: it.cost } : it, "costPre", "You paid (before tax) $", { num: 1, ph: "+" + (num(S.settings.buyTaxPct) ?? 6) + "% tax auto" })}${fld(it, "weightOz", "Weight (oz)", { num: 1 })}${fld(it, "dims.l", "L (in)", { num: 1 })}${fld(it, "dims.w", "W (in)", { num: 1 })}</div>
       <div class="grid4">${fld(it, "dims.h", "H (in)", { num: 1 })}</div>
       <div class="btns"><label class="check"><input type="checkbox" data-f="flat" ${it.flat ? "checked" : ""}> Flat card / coin</label><label class="check"><input type="checkbox" data-f="media" ${it.media ? "checked" : ""}> Book / CD / DVD</label></div>
     </section>
@@ -1071,6 +1071,7 @@ document.addEventListener("change", async e => {
     const p = t.dataset.f; const it = S.items[S.open];
     let v = t.type === "checkbox" ? t.checked : t.dataset.num ? num(t.value) : t.value;
     let patch = pathPatch(p, v);
+    if (p === "costPre") patch.cost = v == null ? null : Math.round(v * (1 + (num(S.settings.buyTaxPct) ?? 6) / 100) * 100) / 100;
     if (p === "stage" && v === "complete") patch.completedAt = Date.now();
     if (/^plat\.\w+\.status$/.test(p)) { const pf = p.split(".")[1];
       if (v === "listed") { patch.plat[pf].listedAt = (it.plat && it.plat[pf] && it.plat[pf].listedAt) || Date.now(); if (STAGE_IDX[it.stage || "intake"] < 3) patch.stage = "listed"; } }
