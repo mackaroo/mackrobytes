@@ -118,7 +118,6 @@ function applySeason() {
   if (th) document.documentElement.dataset.theme = th; else delete document.documentElement.dataset.theme;
   const v = SEASONS[S.settings.season] ? S.settings.season : seasonNow();
   if (document.documentElement.dataset.season !== v) document.documentElement.dataset.season = v;
-  const el = $("#season"); if (el && el.textContent !== SEASONS[v]) el.textContent = SEASONS[v];
 }
 
 async function boot() {
@@ -348,7 +347,7 @@ function renderSoon() { if (renderQueued) return; renderQueued = true; requestAn
 const editingIn = el => el && el.contains(document.activeElement) && /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName);
 function render() {
   if (pointerDown) { deferred = true; return; }
-  applySeason();
+  applySeason(); renderSide();
   const main = $("#main");
   if (!editingIn(main)) { const y = window.scrollY; main.innerHTML = '<div class="wrap">' + VIEWS[S.tab]() + "</div>"; window.scrollTo(0, y); }
   if (S.open) {
@@ -411,27 +410,28 @@ const VIEWS = {
     const toPack = items.filter(([, it]) => it.stage === "sold");
     const f = ruleFindings().filter(x => S.items[x.id] && S.items[x.id].stage !== "sold"); const audit = S.audits[today()];
     const latest = Object.values(S.audits).sort((a, b) => (b.date || "").localeCompare(a.date || ""))[0];
+    const kpi = (n, label, act, v) => `<button class="kpi" data-act="${act}" data-v="${v}"><b>${n}</b><span>${label}</span></button>`;
     return `
     ${LOCAL ? `<div class="banner">Preview mode · changes stay in this browser</div>` : ""}
     <div><div class="hello">Hello, ${h(s.ownerName || "Mackenzie")}.</div><div class="hello-sub">${new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}</div></div>
-    ${goalCardHTML()}
-    ${quickAddHTML()}
-    ${priceCheckCardHTML()}
-    <div class="tiles four">
-      <button class="tile d-sell" data-act="stagejump" data-v="tolist"><span class="blob"></span><b>${counts.intake + counts.photographed + counts.drafted}</b><span>To list</span></button>
-      <button class="tile d-keep" data-act="stagejump" data-v="listed"><span class="blob"></span><b>${counts.listed}</b><span>Listed</span></button>
-      <button class="tile d-donate" data-act="stagejump" data-v="sold"><span class="blob"></span><b>${counts.sold}</b><span>To ship</span></button>
-      <button class="tile d-storage" data-act="tab" data-v="sort"><span class="blob"></span><b>${undecided().length}</b><span>To sort</span></button>
+    <div class="kpis">
+      ${kpi(counts.intake + counts.photographed + counts.drafted, "To list", "homeStage", "tolist")}${kpi(counts.listed, "Listed", "homeStage", "listed")}${kpi(counts.sold, "To ship", "homeStage", "sold")}${kpi(undecided().length, "To sort", "tab", "sort")}
+      ${kpi(money(listedVal), "Listed value", "homeStage", "listed")}${kpi(money(netMonth), `Net this month · ${soldMonth.length} sold`, "tab", "profit")}
     </div>
-    ${toPack.length ? fold("pack", "To pack", `<div class="list">${toPack.map(([id, it]) => `<button class="row-item" data-act="open" data-id="${h(id)}">${thumb(it)}<div style="min-width:0"><div class="t">${h(it.name || id)}</div><div class="m"><span class="small muted">Grab</span><span class="sku">${h(it.sku || id)}</span><span class="small muted">from</span>${boxTag(it.box)}</div></div><div class="r small muted">${h(PLAT[(it.sale || {}).platform] || "")}<br>${daysSince((it.sale || {}).date) ? daysSince(it.sale.date) + "d ago" : it.sale ? "today" : ""}</div></button>`).join("")}</div>`, { open: true, badge: `<span class="pill warn">${toPack.length}</span>` }) : ""}
-    ${fold("pipe", "Pipeline", `
-      <div class="pipe">${STAGES.map(([k, n]) => `<button class="${counts[k] ? "has" : ""}" data-act="stagejump" data-v="${k}"><b>${counts[k]}</b><span>${n}</span></button>`).join("")}</div>
-      <div class="stats"><div class="stat"><b>${money(listedVal)}</b><span>listed value</span></div><div class="stat"><b>${soldMonth.length}</b><span>sold this month</span></div><div class="stat"><b>${money(netMonth)}</b><span>net this month</span></div></div>`, { open: true, badge: `<span class="muted small">${items.length} items</span>` })}
-    ${fold("attn", "Needs attention", `
-      ${f.length ? `<div>${f.slice(0, 12).map(x => `<div class="finding"><span class="sev ${x.sev}"></span><div style="min-width:0"><div class="small" style="font-weight:700">${h(x.text)}</div><div class="small muted">${h(x.fix)}</div></div><button class="btn sm" data-act="open" data-id="${h(x.id)}">Open</button></div>`).join("")}</div>` : `<p class="muted small">Nothing to fix.</p>`}`, { badge: `<span class="pill ${f.length ? "warn" : "on"}">${f.length || "All clear"}</span>` })}
-    ${fold("audit", "Daily audit", `
-      <div class="btns"><button class="btn primary" data-act="audit" ${items.length ? "" : "disabled"}>${audit ? "Run again" : "Run today's audit"}</button></div>
-      <div id="auditOut" class="ai-out">${(audit || latest) ? md((audit || latest).text) : ""}</div>`, { badge: `<span class="muted small">${audit ? "Ready" : latest ? h(latest.date) : ""}</span>` })}`;
+    <div class="mob-only">${goalCardHTML()}</div>
+    <div class="mob-only">${quickAddHTML()}</div>
+    <div class="home-grid">
+      <section class="card inv">${homeInvHTML()}</section>
+      <div class="home-side">
+        ${toPack.length ? `<section class="card"><div class="card-h"><h2>To pack</h2><span class="pill warn sp">${toPack.length}</span></div><div class="list">${toPack.map(([id, it]) => `<button class="row-item" data-act="open" data-id="${h(id)}">${thumb(it)}<div style="min-width:0"><div class="t">${h(it.name || id)}</div><div class="m"><span class="small muted">Grab</span><span class="sku">${h(it.sku || id)}</span><span class="small muted">from</span>${boxTag(it.box)}</div></div><div class="r small muted">${h(PLAT[(it.sale || {}).platform] || "")}<br>${daysSince((it.sale || {}).date) ? daysSince(it.sale.date) + "d ago" : it.sale ? "today" : ""}</div></button>`).join("")}</div></section>` : ""}
+        <section class="card"><div class="card-h"><h2>Needs attention</h2><span class="pill sp ${f.length ? "warn" : "on"}">${f.length || "All clear"}</span></div>
+          ${f.length ? `<div>${f.slice(0, 6).map(x => `<div class="finding" data-act="open" data-id="${h(x.id)}"><span class="sev ${x.sev}"></span><div style="min-width:0"><div class="small" style="font-weight:600">${h(x.text)}</div></div></div>`).join("")}</div>${f.length > 6 ? `<p class="small muted" style="margin:0">+${f.length - 6} more</p>` : ""}` : `<p class="muted small" style="margin:0">Nothing to fix.</p>`}</section>
+        ${priceCheckCardHTML()}
+        ${fold("audit", "Daily audit", `
+          <div class="btns"><button class="btn primary" data-act="audit" ${items.length ? "" : "disabled"}>${audit ? "Run again" : "Run today's audit"}</button></div>
+          <div id="auditOut" class="ai-out">${(audit || latest) ? md((audit || latest).text) : ""}</div>`, { badge: `<span class="muted small">${audit ? "Ready" : latest ? h(latest.date) : ""}</span>` })}
+      </div>
+    </div>`;
   },
   items() {
     const F = S.filter;

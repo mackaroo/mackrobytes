@@ -209,7 +209,7 @@ function sortViewHTML() {
     <div class="btns">${waiting ? `<button class="btn sm" data-act="sortGo">Start sorting</button>` : ""}<button class="btn sm" data-act="thingCam">Snap photos</button><button class="btn sm" data-act="thingLib">Library</button></div></div>
     <svg class="ring" viewBox="0 0 80 80" aria-hidden="true"><circle class="bgc" cx="40" cy="40" r="32"/><circle class="fg" cx="40" cy="40" r="32" stroke-dasharray="201.1" stroke-dashoffset="${(201.1 * (1 - pct / 100)).toFixed(1)}" transform="rotate(-90 40 40)"/><text x="40" y="47" text-anchor="middle">${pct}%</text></svg></section>
   ${garageCardHTML()}
-  <div class="tiles">${DEC_ORDER.map(d => `<button class="tile d-${d}" data-act="sortF" data-v="${d}" aria-pressed="${SORT.f === d}"><span class="blob"></span><b>${counts[d]}</b><span>${DEC[d].label}</span></button>`).join("")}</div>
+  <div class="tiles">${DEC_ORDER.map(d => `<button class="tile d-${d}" data-act="sortF" data-v="${d}" aria-pressed="${SORT.f === d}"><b>${counts[d]}</b><span>${DEC[d].label}</span></button>`).join("")}</div>
   ${SORT.f !== "all" ? `<section class="card"><div class="card-h"><h2>${DEC[SORT.f].label}</h2><button class="btn sm sp" data-act="sortF" data-v="all">Close</button></div>${filt.length ? `<div class="list">${filt.map(([id, t]) => thingRow(id, t)).join("")}</div>` : `<p class="small muted">Nothing here yet.</p>`}</section>` : ""}
   ${ask.length ? fold("ask", "Ask first", `
     <div class="list">${ask.map(([id, t]) => `<div class="checkrow" style="grid-template-columns:44px minmax(0,1fr)">${thingThumb(t)}<div style="min-width:0"><div class="t" style="font-weight:700">${h(thingName(t))}</div><div class="small muted">Ask ${h(t.owner || "them")}${t.bin ? " · from " + h(t.bin) : ""}</div>
@@ -337,7 +337,7 @@ function followupHTML() {
       <div class="btns"><button class="btn primary" data-act="fuLoc" data-v="">Save</button><button class="btn" data-act="fuLoc" data-v="-">Skip</button></div></section></div>`;
   }
   if (d === "ask") return head + `<div class="sorter-stage"><section class="card" style="width:min(100%,440px)"><div class="card-h">${pic}<h2>Whose call is it?</h2></div>
-      <div class="tiles">${["Mom", "Dad", "Both", "Someone else"].map(o => `<button class="tile d-ask" data-act="fuOwner" data-v="${o}"><span class="blob"></span><b style="font-size:18px">${o}</b></button>`).join("")}</div></section></div>`;
+      <div class="tiles">${["Mom", "Dad", "Both", "Someone else"].map(o => `<button class="tile d-ask" data-act="fuOwner" data-v="${o}"><b style="font-size:18px">${o}</b></button>`).join("")}</div></section></div>`;
   // sell: worth-selling check
   const w = SORT.pending;
   return head + `<div class="sorter-stage" style="overflow-y:auto"><section class="card" style="width:min(100%,460px)"><div class="card-h">${pic}<h2>Worth selling?</h2></div>
@@ -554,3 +554,57 @@ document.addEventListener("click", async e => {
       await saveItem(S.open, pcItemPatch(it.priceCheck, it)); toast("Prices filled in from the price check"); break; }
   }
 });
+
+/* ---------- home overview: every item in one list, plus the laptop sidebar ---------- */
+const HOME = { stage: "all", q: "" };
+const HOME_STAGES = [["all", "All"], ["tolist", "To list"], ["listed", "Listed"], ["sold", "To ship"], ["shipped", "Shipped"], ["complete", "Done"]];
+const inHomeStage = (it, k) => k === "all" || (k === "tolist" ? STAGE_IDX[it.stage || "intake"] <= 2 : (it.stage || "intake") === k);
+function homeListHTML() {
+  const q = HOME.q.toLowerCase();
+  const rows = Object.entries(S.items).filter(([id, it]) => inHomeStage(it, HOME.stage) &&
+    (!q || [id, it.sku, it.name, it.brand, it.model, it.official].join(" ").toLowerCase().includes(q)))
+    .sort((a, b) => (b[1].updatedAt || 0) - (a[1].updatedAt || 0));
+  if (!rows.length) return `<div class="empty"><b>${Object.keys(S.items).length ? "Nothing here." : "No items yet."}</b></div>`;
+  return rows.map(([id, it]) => { const price = mainPrice(it);
+    return `<div class="inv-row" role="button" tabindex="0" data-act="open" data-id="${h(id)}">${thumb(it)}
+      <div style="min-width:0"><div class="t">${h(it.name || "Untitled item")}</div><div class="m"><span class="sku">${h(it.sku || id)}</span>${boxTag(it.box)}</div></div>
+      <select data-qstage="${h(id)}" data-act="noop" aria-label="Stage">${STAGES.map(([k, n]) => `<option value="${k}" ${(it.stage || "intake") === k ? "selected" : ""}>${n}</option>`).join("")}</select>
+      <div class="mono pr">${price != null ? money(price) : `<span class="muted">—</span>`}</div></div>`; }).join("");
+}
+function homeInvHTML() {
+  const all = Object.values(S.items); const n = k => all.filter(it => inHomeStage(it, k)).length;
+  return `<div class="card-h"><h2>All items</h2><span class="muted small">${all.length}</span><button class="btn sm sp" data-act="tab" data-v="items">Filters & sorting</button></div>
+    <input type="search" placeholder="Search name, SKU, brand" value="${h(HOME.q)}" data-act-input="homeSearch" aria-label="Search all items">
+    <div class="seg">${HOME_STAGES.map(([k, l]) => `<button data-act="homeStage" data-v="${k}" aria-pressed="${HOME.stage === k}">${l}<span>${n(k)}</span></button>`).join("")}</div>
+    <div class="inv-list" id="homeList">${homeListHTML()}</div>`;
+}
+document.addEventListener("click", e => {
+  const t = e.target.closest("[data-act]"); if (!t || t.dataset.act !== "homeStage") return;
+  HOME.stage = t.dataset.v; render();
+});
+document.addEventListener("input", e => {
+  if (e.target.dataset.actInput !== "homeSearch") return;
+  HOME.q = e.target.value; const l = document.getElementById("homeList"); if (l) l.innerHTML = homeListHTML();
+});
+// Change an item's stage right from the home list without opening it.
+document.addEventListener("change", e => {
+  const t = e.target, id = t.dataset && t.dataset.qstage; if (!id || !S.items[id]) return;
+  saveItem(id, { stage: t.value, ...(t.value === "complete" ? { completedAt: Date.now() } : {}) }); t.blur();
+  toast((S.items[id].name || id) + " → " + stageName(t.value));
+});
+document.addEventListener("keydown", e => { if (e.key === "Enter" && e.target.matches && e.target.matches(".inv-row")) openDetail(e.target.dataset.id); });
+
+const SIDE_ICONS = {
+  tools: '<path d="M14.5 6.5a4 4 0 0 1-5 5L5 16a1.8 1.8 0 0 0 2.5 2.5l4.5-4.5a4 4 0 0 1 5-5l-2.4 2.4-2.1-.4-.4-2.1z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" fill="none"/>',
+  settings: '<circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.6" fill="none"/><path d="M12 2.8v3M12 18.2v3M2.8 12h3M18.2 12h3M5.5 5.5l2.1 2.1M16.4 16.4l2.1 2.1M5.5 18.5l2.1-2.1M16.4 7.6l2.1-2.1" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>'
+};
+// Laptop sidebar below the tabs: quick add, the weekly goal, and Tools/Settings. Hidden on phones.
+function renderSide() {
+  const el = document.getElementById("side"); if (!el || el.contains(document.activeElement)) return;
+  const goal = Math.max(1, num(S.settings.weeklyGoal) || 3), n = listedThisWeek(), days = 7 - ((new Date().getDay() + 6) % 7);
+  const link = (k, name) => `<button class="tab" data-act="tab" data-v="${k}" ${S.tab === k ? 'aria-current="page"' : ""}><svg viewBox="0 0 24 24" aria-hidden="true">${SIDE_ICONS[k]}</svg>${name}</button>`;
+  el.innerHTML = `<div class="side-sec"><div class="eyebrow">Quick add</div>${quickAddHTML()}</div>
+    <div class="side-sec"><div class="eyebrow">This week</div><div class="prog"><i style="width:${Math.min(100, Math.round(n / goal * 100))}%"></i></div>
+      <div class="small muted">${n} of ${goal} listed · ${days}d left</div></div>
+    <div class="side-foot">${link("tools", "Tools")}${link("settings", "Settings")}</div>`;
+}
