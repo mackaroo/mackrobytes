@@ -142,9 +142,11 @@ function showLogin() {
 function startSync() {
   DB = true; setSync("connecting"); PHOTOS.onReady = renderSoon;
   ASSETS = { upload: async blob => ({ id: await PHOTOS.upload(blob) }), delete: async id => PHOTOS.remove(id) };
-  let first = true; const fail = () => setSync("err", "Sync stopped — reload");
-  STORE.watch("items", m => { S.items = m; setSync("ok"); renderSoon(); if (first) { first = false; setTimeout(cleanupPhotos, 2000); } }, fail);
-  STORE.watch("settings", m => { S.settings = { ...DEFAULTS, ...(m.profile || {}) }; renderSoon(); }, fail);
+  const fail = () => setSync("err", "Sync stopped — reload");
+  // Photo cleanup needs both items and the user's settings, or it would use the default number of days.
+  const loaded = new Set(); const ready = c => { if (loaded.size < 2 && !loaded.has(c) && loaded.add(c).size === 2) setTimeout(cleanupPhotos, 2000); };
+  STORE.watch("items", m => { S.items = m; setSync("ok"); renderSoon(); ready("items"); }, fail);
+  STORE.watch("settings", m => { S.settings = { ...DEFAULTS, ...(m.profile || {}) }; renderSoon(); ready("settings"); }, fail);
   ["audits", "expenses", "things", "donations"].forEach(c => STORE.watch(c, m => { S[c] = m; renderSoon(); }, fail));
 }
 
@@ -724,12 +726,15 @@ async function makeThumb(p) {
 async function cleanupPhotos() {
   const days = num(S.settings.photoCleanupDays); if (!days || !ASSETS) return;
   const due = Object.entries(S.items).filter(([, it]) => it.stage === "complete" && (it.photos || []).length && (daysSince(it.completedAt || (it.sale && it.sale.date)) ?? 0) >= days);
+  let n = 0;
   for (const [id, it] of due) {
-    const th = await makeThumb(it.photos[0]);
+    // Keep the photos if no thumbnail could be made (e.g. offline); try again next launch.
+    const th = await makeThumb(it.photos[0]); if (!th) continue;
     await saveItem(id, { photos: [], thumb: th, photosClearedAt: Date.now() });
     for (const p of it.photos) ASSETS.delete(p.id).catch(() => {});
+    n++;
   }
-  if (due.length) toast("Cleared photos from " + due.length + " completed sale(s) to free up space");
+  if (n) toast("Cleared photos from " + n + " completed sale(s) to free up space");
 }
 function feeTable(rows) {
   const name = r => r.p === "fb" ? (r.local ? "FB local" : "FB shipped") : PLAT[r.p];
