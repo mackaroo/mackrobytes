@@ -1,6 +1,6 @@
 # MackroBytes setup
 
-MackroBytes is one app for decluttering, listing and selling. It replaces Garage Sort, Declutter & Sell, and the MackroBytes Studio artifact.
+MackroBytes is one app for decluttering, listing and selling. It replaced Garage Sort, Declutter & Sell, and the MackroBytes Studio artifact; their 41 items and photos were imported on 2026-10-30.
 
 It's plain HTML/CSS/JS with no build step. It's hosted free on GitHub Pages, and Supabase (also free) holds the database, your login and your photos. Changes sync live between your iPhone, Mac and Windows PC.
 
@@ -18,22 +18,10 @@ The anon key is safe to publish. The database refuses anyone who isn't signed in
 ## 2. GitHub Pages (hosting)
 1. On github.com, create a new repository named `mackrobytes`. It has to be **Public** for free Pages. Your data stays private because it lives in Supabase behind your login, not in the repo.
 2. Upload **only the files in this `mackrobytes` folder**. Use **Add file → Upload files** and drag them in.
-   - Don't upload the `mackrobytes-import` folder. It has your item data and photos.
 3. Go to **Settings → Pages**. Set Source to "Deploy from a branch", choose branch `main` and folder `/ (root)`, and click **Save**.
 4. After a minute or two, the app is live at `https://<your-username>.github.io/mackrobytes/`.
 
-## 3. Bring over your Declutter & Sell items (once)
-This copies all 41 items and their 20 cover photos into the app, and sets the SKU counter so new items start at MB26-0043.
-
-Open Terminal in `claude-code-projects` and run:
-
-```bash
-node mackrobytes-import/run-import.mjs
-```
-
-It asks for the MackroBytes email and password you made in step 1.3. It doesn't save them. You can safely run it twice, because items already in the app are skipped.
-
-## 4. Put it on each device
+## 3. Put it on each device
 - **iPhone 15 Pro:** open the link in **Safari**, tap **Share → Add to Home Screen**, then open it from the new icon and sign in.
 - **MacBook Pro:** open the link in Chrome and click the install icon at the right end of the address bar. In Safari, use **File → Add to Dock**.
 - **Windows 11 PC:** open the link in Edge or Chrome and choose **⋯ → Apps → Install this site as an app**. It then shows up in the Start menu.
