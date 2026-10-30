@@ -373,3 +373,99 @@ document.addEventListener("keydown", e => {
   const k = { ArrowRight: "keep", ArrowLeft: "donate", ArrowUp: "sell", ArrowDown: "trash" }[e.key];
   if (k) { e.preventDefault(); decide(SORT.cur, k); }
 });
+
+/* ---------- header turns solid once the page scrolls ---------- */
+addEventListener("scroll", () => { const t = $(".top"); if (t) t.classList.toggle("scrolled", scrollY > 4); }, { passive: true });
+
+/* ---------- price check: market value + where to list (copy & paste, Claude searches the web) ---------- */
+const PC = { q: "", res: null };
+try { Object.assign(PC, JSON.parse(lsGet("mb-pc", "{}"))); } catch {}
+function priceCheckPrompt(q, it) {
+  const known = it ? { brand: it.brand, model: it.model, condition: it.condition, flaws: it.condNotes, included: it.included } : null;
+  return `You are a resale pricing researcher. Use web search to find what this item has actually SOLD for recently (last 90 days if possible): eBay sold/completed listings first, then Mercari, Poshmark, Depop and Facebook Marketplace. Asking prices are not sold prices; only use them if you find no sales, and say so in "tips".
+
+${profileText()}
+
+ITEM: ${q}${known ? "\nKNOWN DETAILS: " + JSON.stringify(known) : ""}
+
+If the name could be several products, pick the most likely one and say what to check in "verify". Never invent sales. Suggest a list price per platform for this seller (FB is local pickup, so it can be a little lower).
+
+Reply with ONLY one JSON object in exactly this shape (USD numbers without $ signs; null when unknown):
+{"identified":"exact product name","model":"model or part number","found":true,"soldLow":0,"soldTypical":0,"soldHigh":0,"retailNew":null,"salesFound":0,"demand":"high","speed":"how fast these usually sell","weightOz":0,"fragile":false,"best":"ebay","platforms":{"ebay":{"fit":"best","price":0,"why":"..."},"depop":{"fit":"good","price":0,"why":"..."},"fb":{"fit":"skip","price":0,"why":"..."}},"other":"another site worth trying and why, or empty","quickSale":0,"tips":["..."],"verify":["..."],"compSearch":"best search phrase for sold comps","sources":["https://..."],"confidence":"medium"}`;
+}
+// Take-home per platform with this seller's fees: buyer pays the label on eBay and Depop, FB is local pickup.
+function pcRows(r) {
+  const sp = shipPlan({ weightOz: num(r.weightOz), box: r.fragile ? "fragile" : "hobby" }), label = sp.cost || 0, pkg = pkgCost(sp.pkg), P = r.platforms || {};
+  return { label, oz: sp.packedOz, rows: Object.keys(PLAT).map(p => { const x = P[p] || {}, price = num(x.price) ?? num(r.soldTypical) ?? 0;
+    return { p, x, price, net: netFor(p, p === "fb" ? { price, local: true } : { price, ship: label, label, pkg }).net }; }) };
+}
+async function runPriceCheck(q, id) {
+  q = String(q || "").trim(); if (!q) { toast("Type a name or model # first."); return; }
+  let r; try { r = await ai({ prompt: priceCheckPrompt(q, id ? S.items[id] : null), json: true }); } catch (e) { if (e && e.code !== "cancelled") toast(aiMsg(e)); return; }
+  if (!r || typeof r !== "object") { toast(aiMsg({ code: "invalid_json" })); return; }
+  r.q = q; r.at = Date.now();
+  if (id) { await saveItem(id, { priceCheck: r }); toast("Price check saved to this item"); return; }
+  PC.q = q; PC.res = r; lsSet("mb-pc", JSON.stringify(PC)); renderSoon();
+}
+function pcResultHTML(r, ctx) {
+  if (r.found === false && num(r.soldTypical) == null) return `<div class="banner">Couldn't find sold prices for that. ${h((r.verify || []).join(" · ") || "Try adding the brand or model #.")}</div>`;
+  const { label, oz, rows } = pcRows(r), top = rows.reduce((a, x) => x.net > a.net ? x : a, rows[0]);
+  const pick = rows.find(x => x.p === r.best) || top, min = num(S.settings.sellMin) || 12, ok = top.net >= min;
+  const lo = num(r.soldLow), hi = num(r.soldHigh), typ = num(r.soldTypical);
+  const range = lo != null && hi != null && lo !== hi ? money(lo) + "–" + money(hi) : money(typ ?? lo ?? hi);
+  const q = encodeURIComponent(r.compSearch || r.identified || r.q || "");
+  return `<div class="offer-res">
+    <div class="small muted">${h(r.identified || r.q)}${r.model ? " · " + h(r.model) : ""} · ${h(r.confidence || "?")} confidence</div>
+    <div class="verdict">Sells for ${range}</div>
+    <div class="small">${typ != null ? "Typical " + money(typ) : ""}${num(r.salesFound) ? " · " + num(r.salesFound) + " recent sales" : ""}${r.demand ? " · " + h(r.demand) + " demand" : ""}${num(r.retailNew) ? " · new " + money(num(r.retailNew)) : ""}${r.speed ? "<br>" + h(r.speed) : ""}</div>
+    <div class="pick"><span>List on</span><span class="big">${h(PLAT[pick.p])}</span></div>
+    ${pick.x.why ? `<p class="small" style="margin:0">${h(pick.x.why)}</p>` : ""}
+    <div class="scroll-x"><table class="money"><thead><tr><th></th><th>Fit</th><th>List at</th><th>You keep</th></tr></thead><tbody>
+      ${rows.map(x => `<tr class="${x.x.fit === "skip" ? "muted" : ""}"><td>${x.p === "fb" ? "FB local" : h(PLAT[x.p])}</td><td><span class="pill ${x.x.fit === "best" ? "on" : ""}">${h(x.x.fit || "?")}</span></td><td>${money(x.price)}</td><td class="${x.net >= min ? "pos" : ""}">${money(x.net)}</td></tr>`).join("")}</tbody></table></div>
+    <p class="small muted" style="margin:0">After your fees and packaging. eBay and Depop assume the buyer pays a ~${money(label)} label${oz ? " (" + oz + " oz packed)" : ""}.${r.other ? " Also try: " + h(r.other) : ""}</p>
+    <div class="small ${ok ? "pos" : "neg"}" style="font-weight:700">${ok ? "Worth listing." : "Under your " + money(min) + " cutoff. Bundle it or donate it."}${num(r.quickSale) ? ` <span class="muted" style="font-weight:600">Quick-sale price: ${money(num(r.quickSale))}.</span>` : ""}</div>
+    ${r.tips && r.tips.length ? `<ul class="small" style="margin:0;padding-left:18px">${r.tips.slice(0, 4).map(t => `<li>${h(t)}</li>`).join("")}</ul>` : ""}
+    ${r.verify && r.verify.length ? `<div class="banner"><b>Check:</b> ${r.verify.map(h).join(" · ")}</div>` : ""}
+    <div class="btns">${ctx === "item" ? `<button class="btn primary" data-act="pcUse">Use these prices</button>` : `<button class="btn primary" data-act="pcAdd">Add as item</button>`}
+      <a class="btn sm" target="_blank" rel="noopener" href="https://www.ebay.com/sch/i.html?_nkw=${q}&LH_Sold=1&LH_Complete=1">eBay sold ↗</a>
+      ${(r.sources || []).filter(u => /^https?:\/\//.test(u)).slice(0, 2).map((u, i) => `<a class="btn sm" target="_blank" rel="noopener" href="${h(u)}">Source ${i + 1} ↗</a>`).join("")}</div>
+    <div class="small muted">Checked ${new Date(r.at || Date.now()).toLocaleDateString()}</div></div>`;
+}
+function priceCheckCardHTML() {
+  return `<section class="card"><div class="card-h"><h2>Price check</h2>${PC.res ? `<button class="btn sm ghost sp" data-act="pcClear">Clear</button>` : ""}</div>
+    <p class="small muted" style="margin:0">Type a name or model #. Claude looks up recent sold prices and tells you where it'll sell best.</p>
+    <form class="quick" data-pc><input type="text" name="q" value="${h(PC.q)}" placeholder="e.g. Nintendo DS Lite USG-001" aria-label="Item name or model number" enterkeyhint="search" autocomplete="off"><button class="btn primary" type="submit">Research</button></form>
+    ${PC.res ? pcResultHTML(PC.res, "home") : ""}</section>`;
+}
+// What a price check fills on an item. Only blank details get filled; prices are replaced.
+function pcItemPatch(r, it = {}) {
+  const { rows } = pcRows(r), fit = {}, plat = {};
+  rows.forEach(x => { fit[x.p] = { fit: x.x.fit || "good", why: x.x.why || "" }; if (x.x.fit !== "skip" && !((it.plat || {})[x.p] || {}).status) plat[x.p] = { status: "planned" }; });
+  const line = `Price check ${new Date(r.at || Date.now()).toLocaleDateString()}: sold ${money(num(r.soldLow))}–${money(num(r.soldHigh))}, typical ${money(num(r.soldTypical))}${num(r.salesFound) ? " (" + num(r.salesFound) + " sales)" : ""}`;
+  const p = { prices: Object.fromEntries(rows.map(x => [x.p, x.price || null])), comps: it.comps ? it.comps + "\n" + line : line,
+    ai: { platformFit: fit, pricing: { confidence: r.confidence || "", rationale: line + ". " + (r.speed || ""), quickSale: num(r.quickSale), compSearch: r.compSearch || "" } } };
+  if (Object.keys(plat).length) p.plat = plat;
+  if (num(it.floor) == null && num(r.quickSale)) p.floor = num(r.quickSale);
+  if (r.compSearch) p.listing = { compSearch: r.compSearch };
+  if (num(it.weightOz) == null && num(r.weightOz)) p.weightOz = num(r.weightOz);
+  if (!it.model && r.model) p.model = r.model;
+  return p;
+}
+document.addEventListener("submit", e => {
+  const f = e.target.closest("[data-pc]"); if (!f) return;
+  e.preventDefault(); const inp = f.querySelector("input"); inp.blur(); runPriceCheck(inp.value);
+});
+document.addEventListener("click", async e => {
+  const t = e.target.closest("[data-act]"); if (!t) return;
+  switch (t.dataset.act) {
+    case "pcClear": PC.q = ""; PC.res = null; lsSet("mb-pc", "{}"); render(); break;
+    case "pcAdd": { const r = PC.res; if (!r) break;
+      const id = await newItem({ name: r.identified || r.q, box: r.fragile ? "fragile" : "hobby", priceCheck: r, ...pcItemPatch(r) });
+      PC.q = ""; PC.res = null; lsSet("mb-pc", "{}");
+      toast("Added " + S.items[id].sku, { label: "Open", fn: () => openDetail(id) }); break; }
+    case "pcItem": { const it = S.open && S.items[S.open]; if (!it) break;
+      runPriceCheck([it.brand, it.model, it.official || it.name].filter(Boolean).join(" "), S.open); break; }
+    case "pcUse": { const it = S.open && S.items[S.open]; if (!it || !it.priceCheck) break;
+      await saveItem(S.open, pcItemPatch(it.priceCheck, it)); toast("Prices filled in from the price check"); break; }
+  }
+});

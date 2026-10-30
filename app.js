@@ -74,7 +74,7 @@ async function copyText(text, btn) {
 /* ---------- state & store ---------- */
 const S = { items: {}, settings: { ...DEFAULTS }, audits: {}, expenses: {}, things: {}, donations: {}, tab: "today", filter: { q: "", box: "all", stage: "all" }, open: null, chat: [], tools: "fees", bundle: { sel: {}, pct: 10, plat: "ebay" }, period: "month", exp: { type: "expense" }, delExp: null, offerT: { item: "", amt: "", plat: "ebay" }, msgItem: "", tplEdit: false };
 // DB is true once signed in to Supabase; LOCAL is the no-config preview that keeps data in this browser only.
-let DB = false, SAMPLE = null, SAMPLE_OFF = false, IMG_LIMITS = null, LOCAL = false;
+let DB = false, LOCAL = false;
 let ASSETS = null;
 const queues = {};
 function enqueue(key, fn) { const p = (queues[key] || Promise.resolve()).then(fn, fn); queues[key] = p.catch(() => {}); return p; }
@@ -191,6 +191,11 @@ function netFor(p, { price, ship = 0, label = 0, pkg = 0, cost = 0, local = fals
   const net = price + ship - fees - label - pkg - (cost || 0);
   return { gross: price + ship, fees, lines, label, pkg, cost: cost || 0, net, ship };
 }
+// The four payout columns: eBay, Depop, FB shipped, FB local pickup.
+const FEE_COLS = [["ebay", false], ["depop", false], ["fb", false], ["fb", true]];
+const feeCalcRows = v => FEE_COLS.map(([p, local]) => ({ p, local, r: netFor(p, { price: num(v.price), ship: num(v.ship), label: num(v.label), pkg: num(v.pkg), cost: num(v.cost), local }) }));
+// The price shown in lists: eBay first, then Depop, then FB.
+const mainPrice = it => num((it.prices || {}).ebay) ?? num((it.prices || {}).depop) ?? num((it.prices || {}).fb);
 function itemNet(it, p, local) {
   const sp = shipPlan(it); const price = num((it.prices || {})[p]);
   const label = num(it.labelCost) ?? sp.cost ?? 0;
@@ -255,39 +260,18 @@ function looseJSON(t) {
   throw { code: "invalid_json", message: "No JSON found" };
 }
 const AI_ERR = {
-  rate_limited: "You've hit a Claude usage limit. Try again in a bit.",
-  session_expired: "Sign in to Claude again, then retry.",
-  refused: "Claude declined that request. Change the item details and try again.",
   invalid_json: "Claude's answer wasn't in the expected format. Tap the button to try again.",
-  image_rejected: "One of the photos couldn't be sent. Try with fewer photos.",
-  prompt_too_large: "That's too much data in one request. Try fewer items.",
-  empty_completion: "Claude returned nothing. Try again.",
   cancelled: "Stopped."
 };
-const aiMsg = e => AI_ERR[e && e.code] || "Couldn't reach Claude. Check your connection and try again.";
-// Runs a prompt hands-free through Claude, or falls back to copy & paste.
-async function ai({ prompt, json = false, images, tier, onText, signal, cache }) {
-  const direct = SAMPLE && !SAMPLE_OFF && S.settings.aiMode !== "copy";
-  if (!direct) { const t = await manualAI(prompt, !!(images && images.length)); return json ? looseJSON(t) : t; }
-  const opts = { onText, signal }; if (tier) opts.modelTier = tier; if (cache === false) opts.cache = false;
-  if (images && images.length && IMG_LIMITS) opts.images = images.slice(0, IMG_LIMITS.maxCount);
-  try {
-    if (json) return await SAMPLE.json(prompt, opts);
-    return (await SAMPLE(prompt, opts)).text;
-  } catch (e) {
-    if (["not_granted", "sampling_disabled", "not_declared", "capability_disabled", "capability_removed"].includes(e && e.code)) {
-      SAMPLE_OFF = true; toast("Claude isn't allowed in this view. Switching to copy & paste.");
-      const t = await manualAI(prompt, !!opts.images); return json ? looseJSON(t) : t;
-    }
-    throw e;
-  }
-}
-function manualAI(prompt, hasImages) {
+const aiMsg = e => AI_ERR[e && e.code] || "Something went wrong. Try again.";
+// Every AI feature is copy & paste: show the prompt, wait for the pasted reply. attach = how many photos to attach in Claude.
+async function ai({ prompt, json = false, attach = 0 }) { const t = await manualAI(prompt, attach); return json ? looseJSON(t) : t; }
+function manualAI(prompt, attach) {
   return new Promise((resolve, reject) => {
     const m = $("#modal"); m.hidden = false;
     m.innerHTML = `<div class="modal-card" role="dialog" aria-label="Copy prompt to Claude">
       <div class="card-h"><h2>Send to Claude</h2><button class="btn sm ghost sp" id="mClose">Cancel</button></div>
-      <p class="small muted">1. Copy the prompt and paste it into the Claude app${hasImages ? ", attaching this item's photos" : ""}. 2. Copy Claude's whole reply. 3. Paste it below.</p>
+      <p class="small muted">1. Copy the prompt and paste it into the Claude app${attach ? ", attaching this item's photos (up to " + attach + ")" : ""}. 2. Copy Claude's whole reply. 3. Paste it below.</p>
       <textarea id="mPrompt" readonly style="min-height:120px" class="small mono">${h(prompt)}</textarea>
       <button class="btn primary" id="mCopy">Copy prompt</button>
       <hr>
@@ -323,12 +307,6 @@ RULES
 Reply with ONLY one JSON object in exactly this shape (numbers in USD, no $ signs):
 {"identified":"one line","verify":["..."],"platformFit":{"ebay":{"fit":"best","why":"..."},"depop":{"fit":"good","why":"..."},"fb":{"fit":"skip","why":"..."}},"ebay":{"title":"...","description":"...","itemSpecifics":[["Brand","..."]],"categoryHint":"...","price":0,"bestOfferAccept":0,"bestOfferDecline":0},"depop":{"description":"...","keywords":["..."],"price":0},"fb":{"title":"...","description":"...","price":0},"pricing":{"floor":0,"quickSale":0,"confidence":"medium","rationale":"...","compSearch":"..."},"shipping":{"service":"...","packaging":"...","notes":"..."},"photoTips":["..."]}`;
 }
-async function photoBlobs(it, max) {
-  const out = [];
-  for (const p of (it.photos || []).slice(0, max)) { try { const r = await fetch(await photoFetchUrl(p)); if (r.ok) out.push(await r.blob()); } catch {} }
-  return out;
-}
-
 /* ---------- photos ---------- */
 const memPhotos = {}; // preview-only blobs when there's no asset store
 const photoSrc = p => memPhotos[p.id] || (DB ? PHOTOS.src(p.id) : "data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==");
@@ -400,15 +378,15 @@ function thumb(it) { const p = (it.photos || [])[0]; return p ? `<img class="thu
 function itemListHTML() {
   const F = S.filter; const q = F.q.toLowerCase();
   const rows = Object.entries(S.items).filter(([id, it]) =>
-    (F.box === "all" || it.box === F.box) && (F.stage === "all" || (it.stage || "intake") === F.stage) &&
-    (!q || [id, it.sku, it.name, it.brand, it.listing && it.listing.ebayTitle].join(" ").toLowerCase().includes(q)));
+    (F.box === "all" || it.box === F.box) && (F.stage === "all" || (F.stage === "tolist" ? STAGE_IDX[it.stage || "intake"] <= 2 : (it.stage || "intake") === F.stage)) &&
+    (!q || [id, it.sku, it.name, it.brand, it.model, it.official, it.listing && it.listing.ebayTitle].join(" ").toLowerCase().includes(q)));
   rows.sort((a, b) => (b[1].updatedAt || 0) - (a[1].updatedAt || 0));
   return rows.length ? `<div class="list">${rows.map(([id, it]) => itemRow(id, it)).join("")}</div>` :
     `<div class="empty"><b>${Object.keys(S.items).length ? "Nothing matches these filters." : "No items yet."}</b><span class="small">Add items one at a time or paste your whole SKU list on the Add tab.</span><button class="btn primary" data-act="tab" data-v="add">Add items</button></div>`;
 }
 function itemRow(id, it) {
   const pl = it.plat || {}; const on = Object.keys(PLAT).filter(p => (pl[p] || {}).status === "listed");
-  const price = num((it.prices || {}).ebay) ?? num((it.prices || {}).depop) ?? num((it.prices || {}).fb);
+  const price = mainPrice(it);
   return `<button class="row-item" data-act="open" data-id="${h(id)}">${thumb(it)}
     <div style="min-width:0"><div class="t">${h(it.name || "Untitled item")}</div>
     <div class="m"><span class="sku">${h(it.sku || id)}</span>${boxTag(it.box)}<span class="pill ${STAGE_IDX[it.stage] >= 3 ? "on" : ""}">${stageName(it.stage)}</span></div></div>
@@ -420,7 +398,7 @@ const VIEWS = {
   today() {
     const items = Object.entries(S.items); const s = S.settings;
     const counts = Object.fromEntries(STAGES.map(x => [x[0], 0])); items.forEach(([, it]) => counts[it.stage || "intake"]++);
-    const listedVal = items.filter(([, it]) => it.stage === "listed").reduce((a, [, it]) => a + (num((it.prices || {}).ebay) ?? num((it.prices || {}).depop) ?? num((it.prices || {}).fb) ?? 0), 0);
+    const listedVal = items.filter(([, it]) => it.stage === "listed").reduce((a, [, it]) => a + (mainPrice(it) ?? 0), 0);
     const [ma, mb] = periodRange("month"); const soldMonth = salesIn(+ma, +mb);
     const netMonth = soldMonth.reduce((a, x) => a + (num(x.s.net) || 0), 0);
     const toPack = items.filter(([, it]) => it.stage === "sold");
@@ -432,13 +410,14 @@ const VIEWS = {
     <div><div class="hello">Hello, ${h(s.ownerName || "Mackenzie")}.</div><div class="hello-sub">Today is ${new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })} · good ${hr < 12 ? "morning" : hr < 18 ? "afternoon" : "evening"}</div></div>
     ${goalCardHTML()}
     ${quickAddHTML()}
+    ${priceCheckCardHTML()}
     <div class="tiles four">
-      <button class="tile d-sell" data-act="stagejump" data-v="intake"><span class="blob"></span><b>${counts.intake + counts.photographed + counts.drafted}</b><span>To list</span></button>
+      <button class="tile d-sell" data-act="stagejump" data-v="tolist"><span class="blob"></span><b>${counts.intake + counts.photographed + counts.drafted}</b><span>To list</span></button>
       <button class="tile d-keep" data-act="stagejump" data-v="listed"><span class="blob"></span><b>${counts.listed}</b><span>Listed</span></button>
       <button class="tile d-donate" data-act="stagejump" data-v="sold"><span class="blob"></span><b>${counts.sold}</b><span>To ship</span></button>
       <button class="tile d-storage" data-act="tab" data-v="sort"><span class="blob"></span><b>${undecided().length}</b><span>To sort</span></button>
     </div>
-    ${toPack.length ? `<section class="card"><div class="card-h"><h2>To pack</h2><span class="sp pill warn">${toPack.length}</span></div><div class="list">${toPack.map(([id, it]) => `<button class="row-item" data-act="open" data-id="${h(id)}">${thumb(it)}<div style="min-width:0"><div class="t">${h(it.name || id)}</div><div class="m"><span class="small muted">Grab</span><span class="sku">${h(it.sku || id)}</span><span class="small muted">from</span>${boxTag(it.box)}</div></div><div class="r small muted">${h(PLAT[it.sale.platform] || "")}<br>${daysSince(it.sale.date) ? daysSince(it.sale.date) + "d ago" : "today"}</div></button>`).join("")}</div></section>` : ""}
+    ${toPack.length ? `<section class="card"><div class="card-h"><h2>To pack</h2><span class="sp pill warn">${toPack.length}</span></div><div class="list">${toPack.map(([id, it]) => `<button class="row-item" data-act="open" data-id="${h(id)}">${thumb(it)}<div style="min-width:0"><div class="t">${h(it.name || id)}</div><div class="m"><span class="small muted">Grab</span><span class="sku">${h(it.sku || id)}</span><span class="small muted">from</span>${boxTag(it.box)}</div></div><div class="r small muted">${h(PLAT[(it.sale || {}).platform] || "")}<br>${daysSince((it.sale || {}).date) ? daysSince(it.sale.date) + "d ago" : it.sale ? "today" : ""}</div></button>`).join("")}</div></section>` : ""}
     <section class="card"><div class="card-h"><h2>Pipeline</h2><span class="sp muted small">${items.length} items</span></div>
       <div class="pipe">${STAGES.map(([k, n]) => `<button class="${counts[k] ? "has" : ""}" data-act="stagejump" data-v="${k}"><b>${counts[k]}</b><span>${n}</span></button>`).join("")}</div>
       <div class="stats"><div class="stat"><b>${money(listedVal)}</b><span>listed value</span></div><div class="stat"><b>${soldMonth.length}</b><span>sold this month</span></div><div class="stat"><b>${money(netMonth)}</b><span>net this month</span></div></div>
@@ -457,7 +436,7 @@ const VIEWS = {
     return `<div class="card-h"><h1>Items</h1><button class="btn sm primary sp" data-act="tab" data-v="add">Add item</button></div>
       <input type="text" id="q" placeholder="Search SKU, name, brand" value="${h(F.q)}" aria-label="Search items" data-act-input="search">
       <div class="chips">${[["all", "All boxes"], ...Object.entries(BOXES)].map(([k, n]) => `<button class="chip" data-act="fbox" data-v="${k}" aria-pressed="${F.box === k}">${h(n)}</button>`).join("")}</div>
-      <div class="chips">${[["all", "Any stage"], ...STAGES].map(([k, n]) => `<button class="chip" data-act="fstage" data-v="${k}" aria-pressed="${F.stage === k}">${h(n)}</button>`).join("")}</div>
+      <div class="chips">${[["all", "Any stage"], ["tolist", "To list"], ...STAGES].map(([k, n]) => `<button class="chip" data-act="fstage" data-v="${k}" aria-pressed="${F.stage === k}">${h(n)}</button>`).join("")}</div>
       ${lookupCardHTML()}
       <section class="card" id="itemList">${itemListHTML()}</section>`;
   },
@@ -553,7 +532,7 @@ const VIEWS = {
 const TOOLS = {
   fees() {
     const v = S.feeCalc || (S.feeCalc = { price: 25, ship: 6.25, label: 6.25, cost: 5, pkg: 0.4 });
-    const rows = [["ebay", false], ["depop", false], ["fb", false], ["fb", true]].map(([p, local]) => ({ p, local, r: netFor(p, { price: num(v.price), ship: num(v.ship), label: num(v.label), pkg: num(v.pkg), cost: num(v.cost), local }) }));
+    const rows = feeCalcRows(v);
     return `<section class="card"><h2>What you actually keep</h2>
       <div class="grid3"><label class="f">Sale price<input type="number" inputmode="decimal" step="0.01" data-fee="price" value="${h(v.price)}"></label><label class="f">Buyer pays shipping<input type="number" inputmode="decimal" step="0.01" data-fee="ship" value="${h(v.ship)}"></label><label class="f">Your label cost<input type="number" inputmode="decimal" step="0.01" data-fee="label" value="${h(v.label)}"></label><label class="f">Packaging<input type="number" inputmode="decimal" step="0.01" data-fee="pkg" value="${h(v.pkg)}"></label><label class="f">Your cost for item<input type="number" inputmode="decimal" step="0.01" data-fee="cost" value="${h(v.cost)}"></label></div>
       <div class="scroll-x" id="feeTable">${feeTable(rows)}</div>
@@ -700,7 +679,7 @@ function exportCSV(kind) {
 }
 function templates() { return Array.isArray(S.settings.templates) && S.settings.templates.length ? S.settings.templates : DEFAULT_TEMPLATES; }
 function fillTpl(text, it, extra = {}) {
-  const s = S.settings; const price = it ? (num((it.prices || {}).ebay) ?? num((it.prices || {}).depop) ?? num((it.prices || {}).fb)) : null;
+  const s = S.settings; const price = it ? mainPrice(it) : null;
   const floor = it && num(it.floor) != null ? money(num(it.floor)) : null;
   const map = { item: it ? (it.name || it.sku) : "[item]", sku: it ? it.sku : "[SKU]", price: price != null ? money(price) : "[price]", floor: floor || "[lowest price]",
     counter: extra.counter != null ? money(extra.counter) : floor || "[counter]", tracking: it && it.sale && it.sale.tracking ? it.sale.tracking : "[tracking]",
@@ -710,7 +689,7 @@ function fillTpl(text, it, extra = {}) {
 const niceRound = x => x >= 20 ? Math.round(x) : Math.round(x * 2) / 2;
 function netAt(it, p, price) { const sp = shipPlan(it); const label = num(it.labelCost) ?? sp.cost ?? 0; const ship = it.freeShip ? 0 : (num(it.shipCharge) ?? label); return netFor(p, { price, ship, label, pkg: pkgCost(sp.pkg), cost: num(it.cost) || 0 }).net; }
 function offerCalc(it, plat, offer) {
-  const pr = it.prices || {}; const list = num(pr[plat]) ?? num(pr.ebay) ?? num(pr.depop) ?? num(pr.fb);
+  const pr = it.prices || {}; const list = num(pr[plat]) ?? mainPrice(it);
   if (list == null) return { err: "Set a price for this item first." };
   const floor = num(it.floor) ?? niceRound(list * 0.8); const guessed = num(it.floor) == null;
   let verdict, why, counter = null, tpl = "t4";
@@ -788,7 +767,7 @@ function copyField(it, p, label, opts = {}) {
     ${opts.area ? `<textarea id="${fid(p)}" data-f="${p}" ${max ? `data-max="${max}"` : ""} style="min-height:${opts.tall ? 160 : 84}px">${h(v)}</textarea>` : `<input type="text" id="${fid(p)}" data-f="${p}" ${max ? `data-max="${max}"` : ""} value="${h(v)}">`}</div>`;
 }
 function moneySection(it) {
-  const rows = [["ebay", false], ["depop", false], ["fb", false], ["fb", true]].filter(([p]) => num((it.prices || {})[p]) != null).map(([p, local]) => ({ p, local, r: itemNet(it, p, local) }));
+  const rows = FEE_COLS.filter(([p]) => num((it.prices || {})[p]) != null).map(([p, local]) => ({ p, local, r: itemNet(it, p, local) }));
   return rows.length ? `<div class="scroll-x">${feeTable(rows)}</div>` : `<p class="small muted">Set a price below to see your payout on each platform.</p>`;
 }
 function shipSection(it) {
@@ -832,15 +811,16 @@ function renderDetail() {
     </section>
 
     <section class="card"><h2>Research</h2>
-      <p class="small muted">Check what similar items actually <b>sold</b> for, then paste a few prices. Claude uses them for pricing.</p>
+      <p class="small muted">Run a price check, or look up what similar items actually <b>sold</b> for and paste a few prices. Claude uses them for pricing.</p>
+      <div class="btns"><button class="btn primary" data-act="pcItem">${it.priceCheck ? "Price check again" : "Price check"}</button></div>
+      ${it.priceCheck ? pcResultHTML(it.priceCheck, "item") : ""}
       ${researchLinks(it)}
       ${fld(it, "comps", "Sold comps you found", { area: true, ph: "eBay sold: $42, $38, $45 (used, no box)\nDepop: $40 listed" })}
       ${fld(it, "engagement", "Views / watchers / likes (optional)", { ph: "eBay 120 views, 4 watchers; Depop 9 likes" })}
     </section>
 
     <section class="card" id="aiCard"><div class="card-h"><h2>Write my listing</h2>${A.generatedAt ? `<span class="sp muted small">Last run ${new Date(A.generatedAt).toLocaleDateString()}</span>` : ""}</div>
-      <p class="small muted">Claude writes titles, descriptions and prices for all three apps, picks the best platforms, and plans shipping.${photos.length && IMG_LIMITS ? " It also reads your photos." : ""}</p>
-      ${photos.length && IMG_LIMITS ? `<label class="check"><input type="checkbox" id="useImgs" checked> Send ${Math.min(photos.length, IMG_LIMITS.maxCount, 6)} photo(s) to Claude</label>` : ""}
+      <p class="small muted">Claude writes titles, descriptions and prices for all three apps, picks the best platforms, and plans shipping.${photos.length ? " Attach this item's photos in Claude and it reads them too." : ""}</p>
       <div class="btns"><button class="btn primary" data-act="gen">${A.generatedAt ? "Rewrite listing" : "Write my listing"}</button></div>
       <div id="genStatus"></div>
       ${A.identified ? `<p class="small"><b>Claude sees:</b> ${h(A.identified)}</p>` : ""}
@@ -901,16 +881,12 @@ function refreshComputed() {
 }
 
 /* ---------- actions ---------- */
-let genCtl = null;
 async function generateListing() {
   const id = S.open; const it = S.items[id]; const st = $("#genStatus"); const btn = $('[data-act="gen"]');
-  const useImgs = $("#useImgs") && $("#useImgs").checked;
-  btn.disabled = true; genCtl = new AbortController();
-  st.innerHTML = `<div class="thinking"><span class="spin"></span><span id="genTxt">Thinking… this takes up to a minute.</span><button class="btn sm ghost" data-act="stopgen">Stop</button></div>`;
+  const nPhotos = Math.min((it.photos || []).length, 6);
+  btn.disabled = true; st.innerHTML = `<div class="thinking"><span class="spin"></span>Waiting for Claude's reply…</div>`;
   try {
-    const imgs = useImgs ? await photoBlobs(it, Math.min(IMG_LIMITS ? IMG_LIMITS.maxCount : 0, 6)) : [];
-    const r = await ai({ prompt: listingPrompt(it, id, imgs.length), json: true, images: imgs, signal: genCtl.signal, cache: false,
-      onText: ({ text }) => { const t = $("#genTxt"); if (t) t.textContent = "Writing… " + text.length + " characters"; } });
+    const r = await ai({ prompt: listingPrompt(it, id, nPhotos), json: true, attach: nPhotos });
     if (!r || typeof r !== "object") throw { code: "invalid_json" };
     const prev = { listing: it.listing || {}, prices: it.prices || {}, floor: it.floor ?? null, ai: it.ai || {} };
     const e = r.ebay || {}, d = r.depop || {}, f = r.fb || {}, pr = r.pricing || {};
@@ -928,8 +904,8 @@ async function generateListing() {
     if (Object.keys(plat).length) patch.plat = plat;
     await saveItem(id, patch);
     toast("Listing written", { label: "Undo", fn: () => saveItem(id, prev) });
-  } catch (e) { if (st) st.innerHTML = e && e.code === "cancelled" ? "" : `<p class="small neg">${h(aiMsg(e))}</p>`; if (btn) btn.disabled = false; return; }
-  finally { genCtl = null; }
+    if (st) st.innerHTML = "";
+  } catch (e) { if (st) st.innerHTML = e && e.code === "cancelled" ? "" : `<p class="small neg">${h(aiMsg(e))}</p>`; if (btn) btn.disabled = false; }
 }
 function inventoryForAI(limit = 120) {
   return Object.entries(S.items).slice(0, limit).map(([id, it]) => {
@@ -940,8 +916,8 @@ function inventoryForAI(limit = 120) {
 }
 async function runAI(btn, outSel, prompt) {
   const out = $(outSel); btn.disabled = true;
-  out.innerHTML = `<div class="thinking"><span class="spin"></span>Thinking… this can take a minute.</div>`;
-  try { const t = await ai({ prompt, cache: false, onText: ({ text }) => { const o = $(outSel); if (o) o.innerHTML = md(text); } }); const o = $(outSel); if (o) o.innerHTML = md(t); return t; }
+  out.innerHTML = `<div class="thinking"><span class="spin"></span>Waiting for Claude's reply…</div>`;
+  try { const t = await ai({ prompt }); const o = $(outSel); if (o) o.innerHTML = md(t); return t; }
   catch (e) { const o = $(outSel); if (o) o.innerHTML = e && e.code === "cancelled" ? "" : `<p class="small neg">${h(aiMsg(e))}</p>`; return null; }
   finally { btn.disabled = false; }
 }
@@ -990,7 +966,7 @@ document.addEventListener("click", async e => {
     case "tab": { const i = TAB_ORDER.indexOf(S.tab), j = TAB_ORDER.indexOf(v); goTab(v, i >= 0 && j >= 0 && i !== j ? Math.sign(j - i) : 0); break; }
     case "open": openDetail(t.dataset.id); break;
     case "close": closeDetail(); break;
-    case "stagejump": S.filter.stage = v; S.filter.box = "all"; S.tab = "items"; renderTabs(); render(); break;
+    case "stagejump": S.filter.stage = v; S.filter.box = "all"; S.filter.q = ""; goTab("items", S.tab === "items" ? 0 : 1); break;
     case "fbox": S.filter.box = v; render(); break;
     case "fstage": S.filter.stage = v; render(); break;
     case "tool": S.tools = v; render(); break;
@@ -1012,12 +988,11 @@ document.addEventListener("click", async e => {
     case "lib": $("#libIn").click(); break;
     case "edit": openEditor(S.open, +t.dataset.i); break;
     case "gen": generateListing(); break;
-    case "stopgen": if (genCtl) genCtl.abort(); break;
     case "audit": runAudit(t); break;
     case "sold": markSold(); break;
     case "shipped": saveItem(S.open, { stage: "shipped", sale: { shippedAt: Date.now() } }); break;
     case "complete": saveItem(S.open, { stage: "complete", completedAt: Date.now() }); break;
-    case "unsell": saveItem(S.open, { stage: "listed", sale: null }); break;
+    case "unsell": { const sp = (S.items[S.open].sale || {}).platform; saveItem(S.open, { stage: "listed", sale: null, ...(sp ? { plat: { [sp]: { status: "listed" } } } : {}) }); break; }
     case "del": $("#delConfirm").innerHTML = `<span class="small">Delete this item and its data?</span> <button class="btn sm danger" data-act="delYes">Yes, delete</button>`; break;
     case "delYes": { const id = S.open; const photos = S.items[id].photos || []; closeDetail(); await deleteItem(id); if (ASSETS) for (const p of photos) { ASSETS.delete(p.id).catch(() => {}); if (p.orig) ASSETS.delete(p.orig).catch(() => {}); } toast("Item deleted"); break; }
     case "bundleAI": {
@@ -1062,19 +1037,15 @@ const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 async function askClaude() {
   const box = $("#askIn"); const q = box.value.trim(); if (!q) return; box.value = ""; box.blur();
   S.chat.push({ role: "user", content: q }); render();
-  const chat = $("#chat"); const b = document.createElement("div"); b.className = "bubble ai ai-out"; b.innerHTML = `<div class="thinking"><span class="spin"></span>Thinking…</div>`; chat.append(b);
   const ctx = `You are a friendly, expert e-commerce advisor for a reseller. Be concise and specific. Use plain Markdown ("- " bullets, "## " headings, no tables).\n\n${profileText()}\n\nINVENTORY SUMMARY:\n${JSON.stringify(inventoryForAI(60)).slice(0, 60000)}`;
-  const turns = S.chat.slice(-10); const prompt = [{ role: "user", content: ctx }, { role: "assistant", content: "Got it. What would you like to know?" }, ...turns];
-  try {
-    let text;
-    if (SAMPLE && !SAMPLE_OFF && S.settings.aiMode !== "copy") text = (await SAMPLE(prompt, { cache: false, onText: ({ text }) => { b.innerHTML = md(text); } })).text;
-    else text = await ai({ prompt: ctx + "\n\nQUESTION: " + q });
-    S.chat.push({ role: "assistant", content: text });
-  } catch (e) { if (["not_granted", "sampling_disabled"].includes(e && e.code)) SAMPLE_OFF = true; S.chat.push({ role: "assistant", content: aiMsg(e) }); }
-  render();
+  const history = S.chat.slice(-9, -1).map(m => (m.role === "user" ? "ME: " : "YOU: ") + m.content).join("\n\n");
+  let cancelled = false;
+  try { S.chat.push({ role: "assistant", content: await ai({ prompt: ctx + (history ? "\n\nEARLIER IN THIS CHAT:\n" + history : "") + "\n\nQUESTION: " + q }) }); }
+  catch (e) { if (e && e.code === "cancelled") { S.chat.pop(); cancelled = true; } else S.chat.push({ role: "assistant", content: aiMsg(e) }); }
+  render(); if (cancelled && $("#askIn")) $("#askIn").value = q;
 }
 async function exportData() {
-  const data = JSON.stringify({ exportedAt: new Date().toISOString(), settings: S.settings, items: S.items, expenses: S.expenses, things: S.things, donations: S.donations }, null, 2);
+  const data = JSON.stringify({ exportedAt: new Date().toISOString(), settings: S.settings, items: S.items, audits: S.audits, expenses: S.expenses, things: S.things, donations: S.donations }, null, 2);
   downloadBlob("mackrobytes-backup-" + today() + ".json", new Blob([data], { type: "application/json" })); toast("Backup saved");
 }
 document.addEventListener("change", async e => {
@@ -1084,7 +1055,7 @@ document.addEventListener("change", async e => {
     const f = t.files[0]; t.value = ""; if (!f) return;
     try { const d = JSON.parse(await f.text()); let n = 0; if (d.settings) await saveSettings(d.settings);
       for (const [id, it] of Object.entries(d.items || {})) { if (!S.items[id]) { await saveItem(id, it, { create: true }); n++; } }
-      for (const c of ["expenses", "things", "donations"]) for (const [id, x] of Object.entries(d[c] || {})) if (!S[c][id]) { S[c][id] = x; await putDoc(c, id, x, true); }
+      for (const c of ["audits", "expenses", "things", "donations"]) for (const [id, x] of Object.entries(d[c] || {})) if (!S[c][id]) { S[c][id] = x; await putDoc(c, id, x, true); }
       toast("Restored " + n + " item(s). Existing SKUs were left alone."); } catch { toast("That file isn't a MackroBytes backup."); }
     return; }
   if (t.id === "msgItem") { S.msgItem = t.value; render(); return; }
@@ -1111,7 +1082,7 @@ document.addEventListener("change", async e => {
 document.addEventListener("input", e => {
   const t = e.target;
   if (t.dataset.off) { updateOffer(t); return; }
-  if (t.dataset.fee) { S.feeCalc[t.dataset.fee] = t.value; const v = S.feeCalc; const rows = [["ebay", false], ["depop", false], ["fb", false], ["fb", true]].map(([p, local]) => ({ p, local, r: netFor(p, { price: num(v.price), ship: num(v.ship), label: num(v.label), pkg: num(v.pkg), cost: num(v.cost), local }) })); $("#feeTable").innerHTML = feeTable(rows); }
+  if (t.dataset.fee) { S.feeCalc[t.dataset.fee] = t.value; $("#feeTable").innerHTML = feeTable(feeCalcRows(S.feeCalc)); }
   if (t.dataset.actInput === "search") { S.filter.q = t.value; const l = $("#itemList"); if (l) l.innerHTML = itemListHTML(); }
   if (t.dataset.max) { const c = document.querySelector(`[data-count="${t.dataset.f}"]`); if (c) { c.textContent = t.value.length + "/" + t.dataset.max; c.classList.toggle("over", t.value.length > +t.dataset.max); } }
   if (t.classList.contains("edsl")) { ED.adj[t.dataset.k] = +t.value; t.nextElementSibling.textContent = t.value; edDrawSoon(); }
