@@ -492,7 +492,7 @@ const VIEWS = {
     ${fold("exp", "Expenses & mileage", `
       <div class="grid2"><label class="f">Type<select data-pick="expType"><option value="expense" ${mileage ? "" : "selected"}>Expense</option><option value="mileage" ${mileage ? "selected" : ""}>Mileage</option></select></label><label class="f">Date<input type="date" id="exDate" value="${today()}"></label></div>
       <div class="grid2">${mileage ? `<label class="f">Miles (round trip)<input type="number" inputmode="decimal" step="0.1" id="exMiles"></label>` : `<label class="f">Amount $<input type="number" inputmode="decimal" step="0.01" id="exAmt"></label>`}</div>
-      ${mileage ? "" : `<label class="f">Category<select id="exCat">${EXP_CATS.map(c => `<option>${h(c)}</option>`).join("")}</select></label>`}</div>
+      ${mileage ? "" : `<label class="f">Category<select id="exCat">${EXP_CATS.map(c => `<option>${h(c)}</option>`).join("")}</select></label>`}
       <label class="f">${mileage ? "Purpose" : "Note"}<input type="text" id="exNote" placeholder="${mileage ? "Post office drop-off, 6 packages" : "Poly mailers, 100 pack"}"></label>
       <div class="btns"><button class="btn primary" data-act="addExp">${mileage ? "Add trip" : "Add expense"}</button></div>
       ${exList.length ? `<div class="list">${exList.map(([id, e]) => { const isM = e.type === "mileage"; const v = isM ? (num(e.miles) || 0) * (num(e.rate) || 0) : num(e.amount); return `<div class="finding"><span class="sev ${isM ? "low" : ""}"></span><div style="min-width:0"><div class="small" style="font-weight:700">${h(isM ? (num(e.miles) || 0) + " mi · " + (e.note || "Trip") : (e.category || "Expense") + (e.note ? " · " + e.note : ""))}</div><div class="small muted">${h(e.date)}${isM ? " · deduction at " + Math.round((num(e.rate) || 0) * 1000) / 10 + "¢/mi" : ""}</div></div><div class="btns" style="flex-wrap:nowrap"><span class="num small">${money(v)}</span>${S.delExp === id ? `<button class="btn sm danger" data-act="delExpYes" data-id="${h(id)}">Delete</button>` : `<button class="btn sm ghost" data-act="delExp" data-id="${h(id)}" aria-label="Delete entry">✕</button>`}</div></div>`; }).join("")}</div>` : ""}
@@ -944,7 +944,8 @@ async function generateListing() {
   try {
     const r = await ai({ prompt: listingPrompt(it, id, nPhotos), json: true, attach: nPhotos });
     if (!r || typeof r !== "object") throw { code: "invalid_json" };
-    const prev = { listing: it.listing || {}, prices: it.prices || {}, floor: it.floor ?? null, ai: it.ai || {} };
+    // Undo restores the whole item: merging the old fields back would keep anything the listing added.
+    const prev = JSON.parse(JSON.stringify(it));
     const e = r.ebay || {}, d = r.depop || {}, f = r.fb || {}, pr = r.pricing || {};
     const patch = {
       listing: { ebayTitle: String(e.title || "").slice(0, 120), ebayDesc: e.description || "", ebaySpecifics: Array.isArray(e.itemSpecifics) ? e.itemSpecifics.filter(x => Array.isArray(x) && x.length >= 2).map(x => [String(x[0]), String(x[1])]) : Object.entries(e.itemSpecifics || {}).map(([k, v]) => [k, String(v)]),
@@ -959,7 +960,7 @@ async function generateListing() {
     for (const p of Object.keys(PLAT)) if (!(it.plat && it.plat[p] && it.plat[p].status && it.plat[p].status !== "none") && fit[p] && fit[p].fit !== "skip") plat[p] = { status: "planned" };
     if (Object.keys(plat).length) patch.plat = plat;
     await saveItem(id, patch);
-    toast("Listing written", { label: "Undo", fn: () => saveItem(id, prev) });
+    toast("Listing written", { label: "Undo", fn: () => saveItem(id, prev, { create: true }) });
     if (st) st.innerHTML = "";
   } catch (e) { if (st) st.innerHTML = e && e.code === "cancelled" ? "" : `<p class="small neg">${h(aiMsg(e))}</p>`; if (btn) btn.disabled = false; }
 }

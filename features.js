@@ -93,7 +93,7 @@ function lookupCardHTML() {
   return fold("lookup", "Look items up", `<div class="btns"><button class="btn primary" data-act="lookupAll">Look up ${Math.min(ids.length, 15)} item${ids.length > 1 ? "s" : ""}</button></div>`, { cls: "slim", badge: `<span class="pill on">${ids.length}</span>` });
 }
 function lookupInfoHTML(it) {
-  const st = it.lookup === "done" ? `Found${it.lookupSrc ? ` · <a href="${h(it.lookupSrc)}" target="_blank" rel="noopener">source</a>` : ""}` : it.lookup === "notfound" ? "Not found" : "Not looked up yet";
+  const st = it.lookup === "done" ? `Found${/^https?:\/\//i.test(it.lookupSrc || "") ?` · <a href="${h(it.lookupSrc)}" target="_blank" rel="noopener">source</a>` : ""}` : it.lookup === "notfound" ? "Not found" : "Not looked up yet";
   return `<div class="card-h"><span class="small muted">Lookup: ${st}</span><button class="btn sm sp" data-act="lookupOne">${it.lookup ? "Look up again" : "Look it up"}</button></div>
     ${it.lookupNote ? `<p class="small muted" style="margin:0">${h(it.lookupNote)}</p>` : ""}${it.origName ? `<p class="small muted" style="margin:0">Your name for it: ${h(it.origName)}</p>` : ""}`;
 }
