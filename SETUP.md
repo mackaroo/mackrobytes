@@ -62,4 +62,4 @@ For lookups, Claude searches the web for the official title, brand, model and so
 - Free Supabase projects **pause after 7 days with no use**. If the app stops loading, open the Supabase dashboard and click **Restore project**.
 - Photos are resized before upload. The free tier (1 GB) holds several thousand photos.
 - **Settings → Backup** saves a JSON copy of everything except photos.
-- To update the app later, upload the changed files to the GitHub repo again. Devices pick up the new version the next time they open it.
+- Updates are pushed to the GitHub repo automatically after each Claude Code session. Devices pick up the new version the next time they open it.

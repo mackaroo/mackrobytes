@@ -19,10 +19,6 @@ const STORE = {
     const { error } = await sb.from("docs").delete().eq("coll", coll).eq("id", id);
     if (error) throw error;
   },
-  async get(coll, id) {
-    const { data, error } = await sb.from("docs").select("data").eq("coll", coll).eq("id", id).maybeSingle();
-    if (error) throw error; return data ? data.data : null;
-  },
   // Calls onChange(map of id -> data) now and after every change from any device.
   watch(coll, onChange, onError) {
     const map = {};

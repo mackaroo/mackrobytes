@@ -32,8 +32,8 @@ async function quickAdd(text) {
   const id = await newItem({ name, ...(price != null ? { prices: { ebay: price } } : {}) });
   toast("Added " + S.items[id].sku, { label: "Open", fn: () => openDetail(id) });
 }
-function quickAddHTML(ph) {
-  return `<form class="quick" data-quick><input type="text" name="q" placeholder="${h(ph || "Quick add: Tinker Bell lamp $25")}" aria-label="Quick add an item" enterkeyhint="done" autocomplete="off"><button class="btn primary" type="submit">Add</button></form>`;
+function quickAddHTML() {
+  return `<form class="quick" data-quick><input type="text" name="q" placeholder="Quick add: Tinker Bell lamp $25" aria-label="Quick add an item" enterkeyhint="done" autocomplete="off"><button class="btn primary" type="submit">Add</button></form>`;
 }
 document.addEventListener("submit", e => {
   const f = e.target.closest("[data-quick]"); if (!f) return;
@@ -429,13 +429,11 @@ document.addEventListener("click", async e => {
     case "fuBack": SORT.pending = null; if (!S.things[SORT.cur] || S.things[SORT.cur].decision !== "undecided") closeSorter(); else renderSorter(); break;
     case "fuLoc": { const loc = v === "-" ? "" : v || $("#fuLoc").value.trim(); const p = SORT.pending; await commit(p.id, { decision: p.d, location: loc, name: S.things[p.id].name || "" }); if (!undecided().length && !SORT.hist.length) closeSorter(); break; }
     case "fuOwner": { const p = SORT.pending; await commit(p.id, { decision: "ask", owner: v, name: S.things[p.id].name || "" }); break; }
-    case "wsSize": SORT.pending.size = v; renderSorter(); break;
     case "wsSell": await sellThing(); break;
     case "wsDonate": { const p = SORT.pending, r = worthCalc(); await commit(p.id, { decision: "donate", value: r ? r.price : null, name: S.things[p.id].name || "" }); break; }
     case "donLog": modal(donLogHTML()); break;
     case "donSave": saveDonation(); break;
     case "thingOpen": modal(thingSheetHTML(id)); break;
-    case "thingReset": await saveThing(id, { decision: "undecided", done: false }); $("#modal").hidden = true; break;
     case "thingDel": $("#thDel").innerHTML = `<span class="small">Delete this for good?</span> <button class="btn sm danger" data-act="thingDelYes" data-id="${h(id)}">Yes, delete</button>`; break;
     case "thingDelYes": { const th = S.things[id]; delete S.things[id]; $("#modal").hidden = true; renderSoon(); await delDoc("things", id); if (th && th.photo && !th.itemId && ASSETS) ASSETS.delete(th.photo.id).catch(() => {}); break; }
     case "csvDon": { const rows = [["Date", "Place", "Item", "Value"]]; Object.values(S.donations).sort((x, y) => (x.date || "").localeCompare(y.date || "")).forEach(d => (d.items || []).forEach(x => rows.push([d.date, d.place, x.name, x.value]))); saveFile("donations-" + today() + ".csv", csv(rows), "text/csv"); break; }

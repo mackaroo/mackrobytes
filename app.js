@@ -11,7 +11,7 @@ const DEFAULTS = {
   depopPct: 3.3, depopFixed: 0.45, depopBoostPct: 0,
   fbShipPct: 10, fbShipMin: 0.80,
   pkgEnvelope: 0.10, pkgPoly: 0.15, pkgBubble: 0.40, pkgBox: 0.75,
-  labelPrinter: true, staleDays: 30, theme: "auto", weeklyGoal: 3, sellMin: 12, skuPrefix: "MB", skuYear: null, skuNext: 1,
+  staleDays: 30, theme: "auto", weeklyGoal: 3, sellMin: 12, skuPrefix: "MB", skuYear: null, skuNext: 1,
   season: "auto", photoCleanupDays: 30, mileRateH1: 0.725, mileRateH2: 0.76, mileSwitch: "2026-07-01", templates: null
 };
 const SEASONS = { fall: "Fall", winter: "Winter", spring: "Spring", summer: "Summer" };
@@ -359,10 +359,8 @@ function render() {
 const ICONS = {
   today: '<path d="M4 6h16M4 12h10M4 18h7" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" fill="none"/><circle cx="18.5" cy="16.5" r="3" stroke="currentColor" stroke-width="1.7" fill="none"/>',
   items: '<path d="M3.5 8 12 4l8.5 4v8L12 20l-8.5-4z M3.5 8 12 12l8.5-4 M12 12v8" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" fill="none"/>',
-  add: '<rect x="3.5" y="3.5" width="17" height="17" rx="5" stroke="currentColor" stroke-width="1.6" fill="none"/><path d="M12 8v8M8 12h8" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>',
   profit: '<path d="M4 19.5h16" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M5 15.5l4.5-4.5 3.5 3 6-7" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" fill="none"/>',
-  sort: '<rect x="5" y="4" width="11" height="15" rx="3" stroke="currentColor" stroke-width="1.6" fill="none" transform="rotate(-8 10 11)"/><path d="M14 7.5l4 1.2-3 11.5" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round" fill="none"/>',
-  tools: '<path d="M14.5 6.5a4 4 0 0 1-5 5L5 16a1.8 1.8 0 0 0 2.5 2.5l4.5-4.5a4 4 0 0 1 5-5l-2.4 2.4-2.1-.4-.4-2.1z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" fill="none"/>'
+  sort: '<rect x="5" y="4" width="11" height="15" rx="3" stroke="currentColor" stroke-width="1.6" fill="none" transform="rotate(-8 10 11)"/><path d="M14 7.5l4 1.2-3 11.5" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round" fill="none"/>'
 };
 function renderTabs() {
   const names = { today: "Home", items: "Items", add: "Add", sort: "Sort", profit: "Money" };
@@ -462,7 +460,7 @@ const VIEWS = {
     return `<div class="card-h"><h1>Tools</h1><select class="sp pick-sel" data-pick="tool" aria-label="Tool">${tabs.map(([k, n]) => `<option value="${k}" ${t === k ? "selected" : ""}>${n}</option>`).join("")}</select></div>` + TOOLS[t]();
   },
   profit() {
-    const [a, b, label] = periodRange(S.period); const sales = salesIn(+a, +b); const ex = expensesIn(+a, +b);
+    const [a, b] = periodRange(S.period); const sales = salesIn(+a, +b); const ex = expensesIn(+a, +b);
     const sum = fn => sales.reduce((t, x) => t + (num(fn(x.s)) || 0), 0);
     const gross = sum(s => s.gross), fees = sum(s => s.fees), shipc = sum(s => (num(s.label) || 0) + (num(s.pkg) || 0)), cogs = sum(s => s.cost), net = sum(s => s.net);
     const spend = ex.filter(x => x.e.type !== "mileage").reduce((t, x) => t + x.ded, 0);
@@ -729,7 +727,7 @@ async function cleanupPhotos() {
   for (const [id, it] of due) {
     const th = await makeThumb(it.photos[0]);
     await saveItem(id, { photos: [], thumb: th, photosClearedAt: Date.now() });
-    for (const p of it.photos) { ASSETS.delete(p.id).catch(() => {}); if (p.orig) ASSETS.delete(p.orig).catch(() => {}); }
+    for (const p of it.photos) ASSETS.delete(p.id).catch(() => {});
   }
   if (due.length) toast("Cleared photos from " + due.length + " completed sale(s) to free up space");
 }
@@ -784,7 +782,7 @@ function renderDetail() {
     <input type="text" data-f="name" id="f-name" value="${h(it.name || "")}" placeholder="Item name" aria-label="Item name" style="font:600 24px var(--f-display);background:transparent;border-color:transparent;padding-left:0">
 
     <section class="card"><div class="card-h"><h2>Photos</h2><span class="sp muted small">${photos.length} / 24</span></div>
-      ${photos.length ? `<div class="photos">${photos.map((p, i) => `<button class="ph" data-act="edit" data-i="${i}" aria-label="Edit photo ${i + 1}"><img src="${h(photoSrc(p))}" alt="" loading="lazy">${i === 0 ? '<span class="tag">Cover</span>' : p.orig ? '<span class="tag">Edited</span>' : ""}</button>`).join("")}</div>` : `<p class="small muted" style="margin:0">Front, back, labels, flaws, scale.</p>`}
+      ${photos.length ? `<div class="photos">${photos.map((p, i) => `<button class="ph" data-act="edit" data-i="${i}" aria-label="Edit photo ${i + 1}"><img src="${h(photoSrc(p))}" alt="" loading="lazy">${i === 0 ? '<span class="tag">Cover</span>' : ""}</button>`).join("")}</div>` : `<p class="small muted" style="margin:0">Front, back, labels, flaws, scale.</p>`}
       <div class="btns"><button class="btn primary" data-act="cam">Take photo</button><button class="btn" data-act="lib">Library</button>${it.driveUrl ? `<a class="btn sm" href="${h(it.driveUrl)}" target="_blank" rel="noopener">Google Drive folder ↗</a>` : ""}</div>
       ${!ASSETS ? `<p class="small muted" style="margin:0">${LOCAL ? "Preview: photos aren't saved." : "Sign in to upload photos."}</p>` : ""}
     </section>
@@ -952,9 +950,6 @@ document.addEventListener("click", async e => {
     case "open": openDetail(t.dataset.id); break;
     case "close": closeDetail(); break;
     case "stagejump": S.filter.stage = v; S.filter.box = "all"; S.filter.bin = "all"; S.filter.q = ""; goTab("items", S.tab === "items" ? 0 : 1); break;
-    case "fbox": S.filter.box = v; render(); break;
-    case "fstage": S.filter.stage = v; render(); break;
-    case "tool": S.tools = v; render(); break;
     case "copy": { const el = document.getElementById(t.dataset.from); const txt = el ? (el.value ?? el.textContent) : ""; if (!String(txt).trim()) { toast("Nothing to copy yet."); break; } copyText(String(txt), t); break; }
     case "addOne": {
       const sku = $("#aSku").value.trim(); if (!sku) { toast("Enter the SKU."); break; }
@@ -979,7 +974,7 @@ document.addEventListener("click", async e => {
     case "complete": saveItem(S.open, { stage: "complete", completedAt: Date.now() }); break;
     case "unsell": { const sp = (S.items[S.open].sale || {}).platform; saveItem(S.open, { stage: "listed", sale: null, ...(sp ? { plat: { [sp]: { status: "listed" } } } : {}) }); break; }
     case "del": $("#delConfirm").innerHTML = `<span class="small">Delete this item and its data?</span> <button class="btn sm danger" data-act="delYes">Yes, delete</button>`; break;
-    case "delYes": { const id = S.open; const photos = S.items[id].photos || []; closeDetail(); await deleteItem(id); if (ASSETS) for (const p of photos) { ASSETS.delete(p.id).catch(() => {}); if (p.orig) ASSETS.delete(p.orig).catch(() => {}); } toast("Item deleted"); break; }
+    case "delYes": { const id = S.open; const photos = S.items[id].photos || []; closeDetail(); await deleteItem(id); if (ASSETS) for (const p of photos) ASSETS.delete(p.id).catch(() => {}); toast("Item deleted"); break; }
     case "bundleAI": {
       const sel = Object.keys(S.bundle.sel).filter(k => S.bundle.sel[k] && S.items[k]);
       runAI(t, "#bundleOut", `You are a reseller pricing expert.\n\n${profileText()}\n\nA buyer wants these items together on ${PLAT[S.bundle.plat]}:\n${JSON.stringify(sel.map(k => itemForAI(S.items[k], k)))}\n\nThe seller is considering ${S.bundle.pct}% off. In plain Markdown ("- " bullets, under 200 words): is that discount smart, what bundle price to counter with, how to ship them together (one box? padding?), and how to word the offer message.`); break; }
@@ -991,8 +986,6 @@ document.addEventListener("click", async e => {
     case "signout": AUTH.signOut(); break;
     case "import": $("#importIn").click(); break;
     case "mclose": $("#modal").hidden = true; $("#modal").innerHTML = ""; break;
-    case "period": S.period = v; render(); break;
-    case "expType": S.exp.type = v; render(); break;
     case "addExp": {
       const date = $("#exDate").value || today(); const note = $("#exNote").value.trim(); const id = "e" + Date.now() + Math.random().toString(36).slice(2, 5);
       if (S.exp.type === "mileage") { const miles = num($("#exMiles").value); if (!miles) { toast("Enter the miles driven."); break; } await saveExpense(id, { type: "mileage", date, miles, rate: mileRate(date), note, createdAt: Date.now() }); toast("Trip added: " + money(miles * mileRate(date)) + " deduction"); }
@@ -1169,7 +1162,7 @@ async function edSave(btn) {
     const photos = [...S.items[ED.id].photos]; const old = photos[ED.i];
     photos[ED.i] = { id: await storePhoto(blob), at: Date.now() };
     await saveItem(ED.id, { photos });
-    if (ASSETS) { ASSETS.delete(old.id).catch(() => {}); if (old.orig) ASSETS.delete(old.orig).catch(() => {}); }
+    if (ASSETS) ASSETS.delete(old.id).catch(() => {});
     closeEditor(); toast("Photo saved");
   } catch (e) { btn.disabled = false; btn.textContent = "Save"; toast(e && e.code === "quota_exceeded" ? "Photo storage is full." : "Couldn't save the photo. Try again."); }
 }
@@ -1184,7 +1177,7 @@ async function edApplyAll(btn) {
       photos[j] = { id: await storePhoto(blob), at: Date.now() };
     }
     await saveItem(ED.id, { photos });
-    if (ASSETS) for (const o of olds) { ASSETS.delete(o.id).catch(() => {}); if (o.orig) ASSETS.delete(o.orig).catch(() => {}); }
+    if (ASSETS) for (const o of olds) ASSETS.delete(o.id).catch(() => {});
     closeEditor(); toast("Edits applied to all " + photos.length + " photos");
   } catch (e) { btn.disabled = false; btn.textContent = "Apply to all " + photos.length + " photos"; toast(e && e.code === "quota_exceeded" ? "Photo storage is full." : "Couldn't finish. No photos were changed."); }
 }
@@ -1194,6 +1187,6 @@ async function edDownload() {
   downloadBlob(name, blob); toast("Saved " + name);
 }
 async function edCover() { const photos = [...S.items[ED.id].photos]; const [p] = photos.splice(ED.i, 1); photos.unshift(p); await saveItem(ED.id, { photos }); closeEditor(); toast("Cover photo set"); }
-async function edDelete() { const photos = [...S.items[ED.id].photos]; const [p] = photos.splice(ED.i, 1); await saveItem(ED.id, { photos }); if (ASSETS) { ASSETS.delete(p.id).catch(() => {}); if (p.orig) ASSETS.delete(p.orig).catch(() => {}); } closeEditor(); toast("Photo deleted"); }
+async function edDelete() { const photos = [...S.items[ED.id].photos]; const [p] = photos.splice(ED.i, 1); await saveItem(ED.id, { photos }); if (ASSETS) ASSETS.delete(p.id).catch(() => {}); closeEditor(); toast("Photo deleted"); }
 
 boot();
