@@ -412,7 +412,7 @@ body::before { content: ""; position: fixed; inset: 0; z-index: -1; pointer-even
 .seg button span { font-size: 12px; font-variant-numeric: tabular-nums; opacity: .75; }
 .seg button[aria-pressed="true"] { background: var(--surface-solid); color: var(--ink); box-shadow: 0 1px 4px rgba(60, 50, 150, .12); }
 .inv-list { display: flex; flex-direction: column; }
-.inv-row { display: grid; grid-template-columns: 44px minmax(0, 1fr) 148px 76px; gap: 12px; align-items: center; padding: 8px 6px; border-top: 1px solid var(--line); cursor: pointer; border-radius: 10px; }
+.inv-row { display: grid; grid-template-columns: 44px minmax(110px, 1fr) 132px 76px; gap: 12px; align-items: center; padding: 8px 6px; border-top: 1px solid var(--line); cursor: pointer; border-radius: 10px; }
 .inv-row:first-child { border-top: 0; }
 .inv-row .thumb { width: 44px; height: 44px; border-radius: 12px; }
 .inv-row .t { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -431,8 +431,6 @@ body::before { content: ""; position: fixed; inset: 0; z-index: -1; pointer-even
   .side-foot { margin-top: auto; display: flex; flex-direction: column; gap: 2px; margin-inline: -6px; }
   .side-foot .tab svg { color: var(--muted); }
   .mob-only { display: none; }
-  .home-grid { display: grid; grid-template-columns: minmax(0, 1fr) 330px; gap: 14px; align-items: start; }
-  .home-side { position: sticky; top: 64px; max-height: calc(100vh - 80px); overflow-y: auto; }
   .inv-list { max-height: calc(100vh - 300px); min-height: 320px; overflow-y: auto; margin-inline: -6px; padding-inline: 6px; }
   .kpis { grid-template-columns: repeat(6, minmax(0, 1fr)); }
 }
@@ -536,3 +534,9 @@ body::before, body::after { display: none; }
 
 /* 7 home KPI boxes: one row on laptop */
 @media (min-width: 1000px) { .kpis { grid-template-columns: repeat(7, minmax(0, 1fr)); } .kpis > .kpi:last-child { grid-column: auto; } }
+
+/* home side column only sits beside the list when there's room; narrower windows stack it below so SKUs aren't crushed */
+@media (min-width: 1280px) {
+  .home-grid { display: grid; grid-template-columns: minmax(0, 1fr) 330px; gap: 14px; align-items: start; }
+  .home-side { position: sticky; top: 64px; max-height: calc(100vh - 80px); overflow-y: auto; }
+}
