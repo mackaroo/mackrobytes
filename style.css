@@ -539,3 +539,8 @@ body::before, body::after { display: none; }
 .title-out { background: var(--surface-2); border-radius: 14px; padding: 12px 14px; }
 .title-out p { margin: 0 0 8px; font-weight: 600; }
 @media (hover: hover) and (pointer: fine) { .tool-tile:hover, .cmp-c:hover { border-color: var(--hue, var(--accent)); } }
+
+/* no blur: the clean theme uses flat surfaces, and backdrop-filter on every card made scrolling flicker */
+.card, .modal-card, .tabs, .stat, .pricebox, .fitc, .offer-res, .bubble.ai, .kpi, .sheet-top, [class*="tile"] {
+  backdrop-filter: none; -webkit-backdrop-filter: none; }
+.top.scrolled { backdrop-filter: none; -webkit-backdrop-filter: none; background: var(--sky-1); }
