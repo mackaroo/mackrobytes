@@ -449,3 +449,11 @@ body::before { content: ""; position: fixed; inset: 0; z-index: -1; pointer-even
   .kpis { grid-template-columns: repeat(6, minmax(0, 1fr)); }
 }
 @media (max-width: 520px) { .kpis { gap: 8px; } .kpi { padding: 9px 10px; border-radius: 14px; } .kpi b { font-size: 17px; } .kpi span { font-size: 11.5px; } }
+
+/* colored labels: each stage and box gets its own tint */
+.st-intake { --sc-hue: var(--c7); } .st-photographed { --sc-hue: var(--c6); } .st-drafted { --sc-hue: var(--c5); }
+.st-listed { --sc-hue: var(--c4); } .st-sold { --sc-hue: var(--c2); } .st-shipped { --sc-hue: var(--c3); } .st-complete { --sc-hue: var(--c1); }
+.pill[class*="st-"], select[class*="st-"] { background: color-mix(in srgb, var(--sc-hue) 34%, transparent); color: var(--ink); border-color: color-mix(in srgb, var(--sc-hue) 65%, transparent); }
+.box { padding: 1px 8px 1px 6px; border-radius: 999px; color: var(--ink); background: color-mix(in srgb, var(--bx) 30%, transparent); }
+.box.fragile { --bx: var(--fr); } .box.hobby { --bx: var(--ht); } .box.soft { --bx: var(--sc); }
+.box i { background: var(--bx); }

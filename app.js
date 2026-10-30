@@ -395,7 +395,7 @@ function itemRow(id, it) {
   const price = mainPrice(it);
   return `<button class="row-item" data-act="open" data-id="${h(id)}">${thumb(it)}
     <div style="min-width:0"><div class="t">${h(it.name || "Untitled item")}</div>
-    <div class="m"><span class="sku">${h(it.sku || id)}</span>${boxTag(it.box)}<span class="pill ${STAGE_IDX[it.stage] >= 3 ? "on" : ""}">${stageName(it.stage)}</span>${it.shot ? `<span class="small muted">#${it.shot}</span>` : ""}</div></div>
+    <div class="m"><span class="sku">${h(it.sku || id)}</span>${boxTag(it.box)}<span class="pill st-${h(it.stage || "intake")}">${stageName(it.stage)}</span>${it.shot ? `<span class="small muted">#${it.shot}</span>` : ""}</div></div>
     <div class="r"><div class="mono">${price != null ? money(price) : ""}</div><div class="muted small">${on.map(p => PLAT[p].split(" ")[0]).join(" · ")}</div></div></button>`;
 }
 

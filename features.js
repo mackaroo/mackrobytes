@@ -568,7 +568,7 @@ function homeListHTML() {
   return rows.map(([id, it]) => { const price = mainPrice(it);
     return `<div class="inv-row" role="button" tabindex="0" data-act="open" data-id="${h(id)}">${thumb(it)}
       <div style="min-width:0"><div class="t">${h(it.name || "Untitled item")}</div><div class="m"><span class="sku">${h(it.sku || id)}</span>${boxTag(it.box)}</div></div>
-      <select data-qstage="${h(id)}" data-act="noop" aria-label="Stage">${STAGES.map(([k, n]) => `<option value="${k}" ${(it.stage || "intake") === k ? "selected" : ""}>${n}</option>`).join("")}</select>
+      <select class="st-${h(it.stage || "intake")}" data-qstage="${h(id)}" data-act="noop" aria-label="Stage">${STAGES.map(([k, n]) => `<option value="${k}" ${(it.stage || "intake") === k ? "selected" : ""}>${n}</option>`).join("")}</select>
       <div class="mono pr">${price != null ? money(price) : `<span class="muted">—</span>`}</div></div>`; }).join("");
 }
 function homeInvHTML() {
