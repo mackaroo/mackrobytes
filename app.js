@@ -207,7 +207,7 @@ function itemNet(it, p, local) {
 function ruleFindings() {
   const out = []; const st = num(S.settings.staleDays) || 30;
   for (const [id, it] of Object.entries(S.items)) {
-    const nm = it.name || id; const stg = STAGE_IDX[it.stage || "intake"]; const photos = (it.photos || []).length;
+    const nm = it.sku || id; const stg = STAGE_IDX[it.stage || "intake"]; const photos = (it.photos || []).length;
     const add = (sev, text, fix) => out.push({ id, sev, text: nm + ": " + text, fix });
     if (it.stage === "sold") { const d = daysSince(it.sale && it.sale.date); const where = "Grab " + (it.sku || id) + " from the " + (BOXES[it.box] || "") + " box."; if (d != null && d >= (num(S.settings.handlingDays) || 1)) add("high", "sold " + d + " day(s) ago and not shipped yet", where + " Ship today to protect your handling-time metrics."); else add("med", "sold, ship within your handling time", where + " Print the label and pack it."); continue; }
     if (stg >= 4) continue;
@@ -380,7 +380,7 @@ function itemListHTML() {
     (!q || [id, it.sku, it.name, it.brand, it.model, it.official, it.listing && it.listing.ebayTitle, it.shot ? "#" + it.shot : ""].join(" ").toLowerCase().includes(q)));
   const by = { new: (a, b) => (b.updatedAt || 0) - (a.updatedAt || 0), old: (a, b) => (a.createdAt || 0) - (b.createdAt || 0),
     hi: (a, b) => (mainPrice(b) ?? -1) - (mainPrice(a) ?? -1), lo: (a, b) => (mainPrice(a) ?? 1e9) - (mainPrice(b) ?? 1e9),
-    name: (a, b) => (a.name || "").localeCompare(b.name || ""), shot: (a, b) => (a.shot ?? 1e9) - (b.shot ?? 1e9) }[F.sort] || ((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+    name: (a, b) => (a.name || "").localeCompare(b.name || ""), sku: (a, b) => (a.sku || "").localeCompare(b.sku || "", undefined, { numeric: true }), shot: (a, b) => (a.shot ?? 1e9) - (b.shot ?? 1e9) }[F.sort] || ((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
   rows.sort((a, b) => by(a[1], b[1]));
   return rows.length ? `<div class="list">${rows.map(([id, it]) => itemRow(id, it)).join("")}</div>` :
     `<div class="empty"><b>${Object.keys(S.items).length ? "No matches." : "No items yet."}</b><button class="btn primary" data-act="tab" data-v="add">Add items</button></div>`;
@@ -389,14 +389,14 @@ function itemFiltersHTML(F) {
   const sel = (k, opts) => `<label class="f">${opts.label}<select data-filt="${k}">${opts.list.map(([v, n]) => `<option value="${h(v)}" ${F[k] === v ? "selected" : ""}>${h(n)}</option>`).join("")}</select></label>`;
   const bins = knownBins();
   return `<div class="filters">${sel("box", { label: "Box", list: [["all", "All boxes"], ...Object.entries(BOXES)] })}${sel("stage", { label: "Stage", list: [["all", "Any stage"], ["tolist", "To list"], ...STAGES] })}
-    ${bins.length ? sel("bin", { label: "Came from", list: [["all", "Any bin"], ...bins.map(b => [b, b])] }) : ""}${sel("sort", { label: "Sort by", list: [["new", "Recently changed"], ["old", "Oldest first"], ["hi", "Price: high to low"], ["lo", "Price: low to high"], ["name", "Name A–Z"], ["shot", "Camera photo #"]] })}</div>`;
+    ${bins.length ? sel("bin", { label: "Came from", list: [["all", "Any bin"], ...bins.map(b => [b, b])] }) : ""}${sel("sort", { label: "Sort by", list: [["new", "Recently changed"], ["old", "Oldest first"], ["hi", "Price: high to low"], ["lo", "Price: low to high"], ["sku", "SKU"], ["name", "Name A–Z"], ["shot", "Camera photo #"]] })}</div>`;
 }
 function itemRow(id, it) {
   const pl = it.plat || {}; const on = Object.keys(PLAT).filter(p => (pl[p] || {}).status === "listed");
   const price = mainPrice(it);
   return `<button class="row-item" data-act="open" data-id="${h(id)}">${thumb(it)}
-    <div style="min-width:0"><div class="t">${h(it.name || "Untitled item")}</div>
-    <div class="m"><span class="sku">${h(it.sku || id)}</span>${boxTag(it.box)}<span class="pill st-${h(it.stage || "intake")}">${stageName(it.stage)}</span>${it.shot ? `<span class="small muted">#${it.shot}</span>` : ""}</div></div>
+    <div style="min-width:0"><div class="t">${h(it.sku || id)}</div>
+    <div class="m">${it.name ? `<span class="small muted">${h(it.name)}</span>` : ""}${boxTag(it.box)}<span class="pill st-${h(it.stage || "intake")}">${stageName(it.stage)}</span>${it.shot ? `<span class="small muted">#${it.shot}</span>` : ""}</div></div>
     <div class="r"><div class="mono">${price != null ? money(price) : ""}</div><div class="muted small">${on.map(p => PLAT[p].split(" ")[0]).join(" · ")}</div></div></button>`;
 }
 
@@ -424,7 +424,7 @@ const VIEWS = {
     <div class="home-grid">
       <section class="card inv">${homeInvHTML()}</section>
       <div class="home-side">
-        ${toPack.length ? `<section class="card"><div class="card-h"><h2>To pack</h2><span class="pill warn sp">${toPack.length}</span></div><div class="list">${toPack.map(([id, it]) => `<button class="row-item" data-act="open" data-id="${h(id)}">${thumb(it)}<div style="min-width:0"><div class="t">${h(it.name || id)}</div><div class="m"><span class="small muted">Grab</span><span class="sku">${h(it.sku || id)}</span><span class="small muted">from</span>${boxTag(it.box)}</div></div><div class="r small muted">${h(PLAT[(it.sale || {}).platform] || "")}<br>${daysSince((it.sale || {}).date) ? daysSince(it.sale.date) + "d ago" : it.sale ? "today" : ""}</div></button>`).join("")}</div></section>` : ""}
+        ${toPack.length ? `<section class="card"><div class="card-h"><h2>To pack</h2><span class="pill warn sp">${toPack.length}</span></div><div class="list">${toPack.map(([id, it]) => `<button class="row-item" data-act="open" data-id="${h(id)}">${thumb(it)}<div style="min-width:0"><div class="t">${h(it.sku || id)}</div><div class="m">${it.name ? `<span class="small muted">${h(it.name)}</span>` : ""}<span class="small muted">from</span>${boxTag(it.box)}</div></div><div class="r small muted">${h(PLAT[(it.sale || {}).platform] || "")}<br>${daysSince((it.sale || {}).date) ? daysSince(it.sale.date) + "d ago" : it.sale ? "today" : ""}</div></button>`).join("")}</div></section>` : ""}
         <section class="card"><div class="card-h"><h2>Needs attention</h2><span class="pill sp ${f.length ? "warn" : "on"}">${f.length || "All clear"}</span></div>
           ${f.length ? `<div>${f.slice(0, 6).map(x => `<div class="finding" data-act="open" data-id="${h(x.id)}"><span class="sev ${x.sev}"></span><div style="min-width:0"><div class="small" style="font-weight:600">${h(x.text)}</div></div></div>`).join("")}</div>${f.length > 6 ? `<p class="small muted" style="margin:0">+${f.length - 6} more</p>` : ""}` : `<p class="muted small" style="margin:0">Nothing to fix.</p>`}</section>
         ${priceCheckCardHTML()}
@@ -488,7 +488,7 @@ const VIEWS = {
     ${fold("m6", "Last 6 months", barChart(months))}
     ${fold("byPlat", "By platform", brk(Object.entries(byPlat), platName))}
     ${fold("byBox", "By box", brk(Object.entries(byBox), k => BOXES[k] || k))}
-    ${top.length ? fold("best", "Best sales", `<div class="list">${top.map(x => `<button class="row-item" data-act="open" data-id="${h(x.id)}">${thumb(x.it)}<div style="min-width:0"><div class="t">${h(x.it.name || x.id)}</div><div class="m"><span class="sku">${h(x.it.sku || x.id)}</span><span class="small muted">${h(platName(x.s.local ? "fblocal" : x.s.platform))}</span></div></div><div class="r"><b class="num pos">${money(x.s.net)}</b><div class="small muted">sold ${money(num(x.s.price))}</div></div></button>`).join("")}</div>`) : ""}
+    ${top.length ? fold("best", "Best sales", `<div class="list">${top.map(x => `<button class="row-item" data-act="open" data-id="${h(x.id)}">${thumb(x.it)}<div style="min-width:0"><div class="t">${h(x.it.sku || x.id)}</div><div class="m">${x.it.name ? `<span class="small muted">${h(x.it.name)}</span>` : ""}<span class="small muted">${h(platName(x.s.local ? "fblocal" : x.s.platform))}</span></div></div><div class="r"><b class="num pos">${money(x.s.net)}</b><div class="small muted">sold ${money(num(x.s.price))}</div></div></button>`).join("")}</div>`) : ""}
     ${fold("exp", "Expenses & mileage", `
       <div class="grid2"><label class="f">Type<select data-pick="expType"><option value="expense" ${mileage ? "" : "selected"}>Expense</option><option value="mileage" ${mileage ? "selected" : ""}>Mileage</option></select></label><label class="f">Date<input type="date" id="exDate" value="${today()}"></label></div>
       <div class="grid2">${mileage ? `<label class="f">Miles (round trip)<input type="number" inputmode="decimal" step="0.1" id="exMiles"></label>` : `<label class="f">Amount $<input type="number" inputmode="decimal" step="0.01" id="exAmt"></label>`}</div>
@@ -526,7 +526,7 @@ const TOOLS = {
     const v = feeState();
     const items = Object.entries(S.items).filter(([, it]) => !it.sale).sort((a, b) => (a[1].name || "").localeCompare(b[1].name || ""));
     return `<section class="card"><h2>Fee calculator</h2>
-      <div class="grid2">${platSelect("fee", v.plat)}<label class="f">Fill from item<select data-fee="item"><option value="">—</option>${items.map(([k, x]) => `<option value="${h(k)}" ${v.item === k ? "selected" : ""}>${h(x.name || x.sku || k)}</option>`).join("")}</select></label>
+      <div class="grid2">${platSelect("fee", v.plat)}<label class="f">Fill from item<select data-fee="item"><option value="">—</option>${items.map(([k, x]) => `<option value="${h(k)}" ${v.item === k ? "selected" : ""}>${h((x.sku || k) + (x.name ? " · " + x.name : ""))}</option>`).join("")}</select></label>
         <label class="f">Sale price $<input type="number" inputmode="decimal" step="0.01" data-fee="price" value="${h(v.price)}" placeholder="0.00"></label><label class="f">You paid $<input type="number" inputmode="decimal" step="0.01" data-fee="cost" value="${h(v.cost)}" placeholder="0.00"></label>
         ${v.plat === "fblocal" ? "" : `${shipModeSelect("fee", v.shipMode)}${weightSelect("fee", v.weight)}${pkgSelect("fee", v.pkg)}`}</div>
       <div id="feeOut">${feeOut(v)}</div></section>`;
@@ -561,7 +561,7 @@ const TOOLS = {
     const items = Object.entries(S.items).sort((a, b) => (b[1].updatedAt || 0) - (a[1].updatedAt || 0));
     const it = S.items[S.msgItem]; const tp = templates(); const ed = S.tplEdit;
     return `<section class="card"><div class="card-h"><h2>Buyer messages</h2><button class="btn sm sp" data-act="tplEdit">${ed ? "Done" : "Edit"}</button></div>
-      ${ed ? `<p class="small muted">Placeholders: {item} {sku} {price} {floor} {counter} {tracking} {city} {shop} {handling} {condition} {pct}. Leave {shop} out of FB messages.</p>` : `<label class="f">Fill in details for<select id="msgItem"><option value="">No item, keep placeholders</option>${items.map(([k, x]) => `<option value="${h(k)}" ${S.msgItem === k ? "selected" : ""}>${h((x.sku || k) + " · " + (x.name || ""))}</option>`).join("")}</select></label>`}
+      ${ed ? `<p class="small muted">Placeholders: {item} {sku} {price} {floor} {counter} {tracking} {city} {shop} {handling} {condition} {pct}. Leave {shop} out of FB messages.</p>` : `<label class="f">Fill in details for<select id="msgItem"><option value="">No item, keep placeholders</option>${items.map(([k, x]) => `<option value="${h(k)}" ${S.msgItem === k ? "selected" : ""}>${h((x.sku || k) + (x.name ? " · " + x.name : ""))}</option>`).join("")}</select></label>`}
       <div>${tp.map((t, i) => ed
         ? `<div class="tpl"><input type="text" data-tpl="${i}" data-k="name" value="${h(t.name)}" aria-label="Template name"><textarea data-tpl="${i}" data-k="text" aria-label="Template text">${h(t.text)}</textarea><div class="btns">${Object.entries(PLAT).map(([k, n]) => `<label class="check small"><input type="checkbox" data-tpl="${i}" data-k="plat" data-v="${k}" ${(t.plat || "").includes(k) ? "checked" : ""}>${n.split(" ")[0]}</label>`).join("")}<button class="btn sm danger" data-act="tplDel" data-i="${i}">Delete</button></div></div>`
         : `<div class="tpl"><div class="card-h"><h3>${h(t.name)}</h3><span class="sp small muted">${(t.plat || "").split(" ").filter(k => PLAT[k]).map(k => PLAT[k].split(" ")[0]).join(" · ")}</span></div><p id="tp${i}">${h(fillTpl(t.text, it))}</p><div class="btns"><button class="btn sm" data-act="copy" data-from="tp${i}">Copy</button></div></div>`).join("")}</div>
@@ -591,7 +591,7 @@ const TOOLS = {
     return `<section class="card"><h2>Bundle discount check</h2>
       <div class="grid2"><label class="f">Platform<select data-bundle="plat">${Object.entries(PLAT).map(([k, n]) => `<option value="${k}" ${B.plat === k ? "selected" : ""}>${n}</option>`).join("")}</select></label><label class="f">Bundle discount %<input type="number" inputmode="decimal" data-bundle="pct" value="${h(B.pct)}"></label></div>
       ${out}
-      <div class="list">${cand.length ? cand.map(([id, it]) => `<label class="check" style="padding:6px 0;border-top:1px solid var(--line)"><input type="checkbox" data-bsel="${h(id)}" ${B.sel[id] ? "checked" : ""}><span style="min-width:0;flex:1">${h(it.name || id)} <span class="sku">${h(it.sku || id)}</span></span><span class="mono small">${money(num((it.prices || {})[B.plat]))}</span></label>`).join("") : `<p class="muted small">No unsold items yet.</p>`}</div>
+      <div class="list">${cand.length ? cand.map(([id, it]) => `<label class="check" style="padding:6px 0;border-top:1px solid var(--line)"><input type="checkbox" data-bsel="${h(id)}" ${B.sel[id] ? "checked" : ""}><span style="min-width:0;flex:1">${h(it.sku || id)} <span class="sku">${h(it.name || "")}</span></span><span class="mono small">${money(num((it.prices || {})[B.plat]))}</span></label>`).join("") : `<p class="muted small">No unsold items yet.</p>`}</div>
     </section>
     <section class="card flat"><h2>Tips</h2><details class="tips"><summary>eBay</summary><ul><li>Set up combined shipping discounts in your shipping preferences so multi-item buyers pay for one shipment.</li><li>Volume pricing (buy 2, save X%) is under Seller Hub, Marketing. It works best on related items, like accessories for the same console.</li><li>Accept bundle offers through Best Offer or a custom invoice. Never take payment off eBay.</li></ul></details>
       <details class="tips"><summary>Depop</summary><ul><li>Turn on bundle discounts in your shop settings. Buyers bundle items from your shop, and the discount applies automatically.</li><li>A tiered discount (say 10% for 2, 15% for 3+) gets buyers browsing your whole shop. Depop rewards that engagement.</li></ul></details>
@@ -729,7 +729,7 @@ function offerBox(id, key) {
   const items = Object.entries(S.items).filter(([, it]) => STAGE_IDX[it.stage || "intake"] <= 3);
   const itemId = id || (S.items[st.item] ? st.item : (items[0] || [])[0]);
   return `<div data-offbox="${key}" ${id ? `data-item="${h(id)}"` : ""} style="display:flex;flex-direction:column;gap:10px">
-    ${id ? "" : `<label class="f">Item<select data-offitem data-off="1">${items.length ? items.map(([k, it]) => `<option value="${h(k)}" ${k === itemId ? "selected" : ""}>${h((it.sku || k) + " · " + (it.name || ""))}</option>`).join("") : `<option value="">No unsold items yet</option>`}</select></label>`}
+    ${id ? "" : `<label class="f">Item<select data-offitem data-off="1">${items.length ? items.map(([k, it]) => `<option value="${h(k)}" ${k === itemId ? "selected" : ""}>${h((it.sku || k) + (it.name ? " · " + it.name : ""))}</option>`).join("") : `<option value="">No unsold items yet</option>`}</select></label>`}
     <div class="grid2"><label class="f">Their offer $<input type="number" inputmode="decimal" step="0.01" data-offamt data-off="1" value="${h(st.amt)}"></label><label class="f">Platform<select data-offplat data-off="1">${Object.entries(PLAT).map(([k, n]) => `<option value="${k}" ${st.plat === k ? "selected" : ""}>${n}</option>`).join("")}</select></label></div>
     <div data-offout>${offerHTML(S.items[itemId], st.plat, num(st.amt), key)}</div></div>`;
 }
@@ -849,10 +849,11 @@ function renderDetail() {
   const L = it.listing || {}; const A = it.ai || {}; const pl = it.plat || {};
   const photos = it.photos || [];
   sheet.className = "sheet";
-  sheet.innerHTML = `<div class="sheet-top"><div class="wrap"><button class="btn sm" data-act="close" title="Back (Esc)">‹ Back</button><span class="sku">${h(it.sku || id)}</span>${boxTag(it.box)}
+  sheet.innerHTML = `<div class="sheet-top"><div class="wrap"><button class="btn sm" data-act="close" title="Back (Esc)">‹ Back</button>${boxTag(it.box)}
     <select style="margin-left:auto;width:auto" data-f="stage" aria-label="Stage">${STAGES.map(([k, n]) => `<option value="${k}" ${(it.stage || "intake") === k ? "selected" : ""}>${n}</option>`).join("")}</select></div></div>
   <div class="sheet-body"><div class="wrap">
-    <input type="text" data-f="name" id="f-name" value="${h(it.name || "")}" placeholder="Item name" aria-label="Item name" style="font:600 24px var(--f-display);background:transparent;border-color:transparent;padding-left:0">
+    <h1 class="item-sku">${h(it.sku || id)}</h1>
+    <input type="text" data-f="name" id="f-name" value="${h(it.name || "")}" placeholder="What is it?" aria-label="Item name" style="background:transparent;border-color:transparent;padding-left:0;margin-top:-8px">
 
     <section class="card"><div class="card-h"><h2>Photos</h2><span class="sp muted small">${photos.length} / 24</span></div>
       ${photos.length ? `<div class="photos">${photos.map((p, i) => `<button class="ph" data-act="edit" data-i="${i}" aria-label="Edit photo ${i + 1}"><img src="${h(photoSrc(p))}" alt="" loading="lazy">${i === 0 ? '<span class="tag">Cover</span>' : ""}</button>`).join("")}</div>` : `<p class="small muted" style="margin:0">Front, back, labels, flaws, scale.</p>`}
@@ -1251,18 +1252,21 @@ async function edSave(btn) {
 }
 async function edApplyAll(btn) {
   if (!ED.bmp) return; btn.disabled = true;
-  const photos = [...S.items[ED.id].photos]; const olds = [...photos]; const shared = { ...ED.adj, rot: 0, straighten: 0 };
+  const photos = [...S.items[ED.id].photos]; const olds = [...photos]; const shared = { ...ED.adj, rot: 0, straighten: 0 }; const made = [];
   try {
     for (let j = 0; j < photos.length; j++) {
       btn.textContent = "Saving " + (j + 1) + " of " + photos.length + "…";
       const bmp = j === ED.i ? ED.bmp : await loadBmp(photos[j]);
       const blob = await toJpeg(edRender(2400, j === ED.i ? ED.adj : shared, false, bmp));
-      photos[j] = { id: await storePhoto(blob), at: Date.now() };
+      photos[j] = { id: await storePhoto(blob), at: Date.now() }; made.push(photos[j].id);
     }
     await saveItem(ED.id, { photos });
     if (ASSETS) for (const o of olds) ASSETS.delete(o.id).catch(() => {});
     closeEditor(); toast("Edits applied to all " + photos.length + " photos");
-  } catch (e) { btn.disabled = false; btn.textContent = "Apply to all " + photos.length + " photos"; toast(e && e.code === "quota_exceeded" ? "Photo storage is full." : "Couldn't finish. No photos were changed."); }
+  } catch (e) {
+    // Remove the copies already uploaded, or they'd sit in storage unused.
+    if (ASSETS) for (const m of made) ASSETS.delete(m).catch(() => {});
+    btn.disabled = false; btn.textContent = "Apply to all " + photos.length + " photos"; toast(e && e.code === "quota_exceeded" ? "Photo storage is full." : "Couldn't finish. No photos were changed."); }
 }
 async function edDownload() {
   const blob = await toJpeg(edRender(2400, ED.adj, false));

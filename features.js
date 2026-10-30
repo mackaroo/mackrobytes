@@ -573,7 +573,7 @@ function homeListHTML() {
   if (!rows.length) return `<div class="empty"><b>${Object.keys(S.items).length ? "Nothing here." : "No items yet."}</b></div>`;
   return rows.map(([id, it]) => { const price = mainPrice(it);
     return `<div class="inv-row" role="button" tabindex="0" data-act="open" data-id="${h(id)}">${thumb(it)}
-      <div style="min-width:0"><div class="t">${h(it.name || "Untitled item")}</div><div class="m"><span class="sku">${h(it.sku || id)}</span>${boxTag(it.box)}</div></div>
+      <div style="min-width:0"><div class="t">${h(it.sku || id)}</div><div class="m">${it.name ? `<span class="small muted">${h(it.name)}</span>` : ""}${boxTag(it.box)}</div></div>
       <select class="st-${h(it.stage || "intake")}" data-qstage="${h(id)}" data-act="noop" aria-label="Stage">${STAGES.map(([k, n]) => `<option value="${k}" ${(it.stage || "intake") === k ? "selected" : ""}>${n}</option>`).join("")}</select>
       <div class="mono pr">${price != null ? money(price) : `<span class="muted">—</span>`}</div></div>`; }).join("");
 }
@@ -596,7 +596,7 @@ document.addEventListener("input", e => {
 document.addEventListener("change", e => {
   const t = e.target, id = t.dataset && t.dataset.qstage; if (!id || !S.items[id]) return;
   saveItem(id, { stage: t.value, ...(t.value === "complete" ? { completedAt: Date.now() } : {}) }); t.blur();
-  toast((S.items[id].name || id) + " → " + stageName(t.value));
+  toast((S.items[id].sku || id) + " → " + stageName(t.value));
 });
 document.addEventListener("keydown", e => { if (e.key === "Enter" && e.target.matches && e.target.matches(".inv-row")) openDetail(e.target.dataset.id); });
 
