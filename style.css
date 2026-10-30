@@ -457,3 +457,57 @@ body::before { content: ""; position: fixed; inset: 0; z-index: -1; pointer-even
 .box { padding: 1px 8px 1px 6px; border-radius: 999px; color: var(--ink); background: color-mix(in srgb, var(--bx) 30%, transparent); }
 .box.fragile { --bx: var(--fr); } .box.hobby { --bx: var(--ht); } .box.soft { --bx: var(--sc); }
 .box i { background: var(--bx); }
+
+/* ---------- clean & bright: flat neutral surfaces, a few vivid colors that do the talking ---------- */
+:root {
+  --sky-1: #F4F5F9; --sky-2: #F4F5F9; --sky-3: #F4F5F9;
+  --surface: #FFFFFF; --surface-solid: #FFFFFF; --surface-2: #F1F2F7;
+  --ink: #1B1D2A; --muted: #6B6F85; --line: #E6E8F0; --line-2: #E1E3EC;
+  --accent: #5B4BFF; --accent-ink: #4A3AF0; --accent-soft: rgba(91, 75, 255, 0.1);
+  --c1: #FF3D71; --c2: #FF8A00; --c3: #F5B700; --c4: #12B76A; --c5: #1E8CFF; --c6: #7A5CFF; --c7: #E040C8;
+  --glass-shadow: 0 1px 2px rgba(20, 22, 40, 0.05), 0 4px 14px rgba(20, 22, 40, 0.05);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --sky-1: #111218; --sky-2: #111218; --sky-3: #111218;
+    --surface: #1B1C24; --surface-solid: #1F2029; --surface-2: #262833;
+    --ink: #F5F6FA; --muted: #A2A5B8; --line: #2C2E3A; --line-2: #32343F;
+    --accent: #8F82FF; --accent-ink: #A99FFF; --accent-soft: rgba(143, 130, 255, 0.16);
+    --c1: #FF5C8A; --c2: #FF9F2E; --c3: #FFCB2E; --c4: #2FD487; --c5: #4AA8FF; --c6: #9B85FF; --c7: #F062D8;
+    --glass-shadow: none;
+  }
+}
+:root[data-theme="dark"] {
+  --sky-1: #111218; --sky-2: #111218; --sky-3: #111218;
+  --surface: #1B1C24; --surface-solid: #1F2029; --surface-2: #262833;
+  --ink: #F5F6FA; --muted: #A2A5B8; --line: #2C2E3A; --line-2: #32343F;
+  --accent: #8F82FF; --accent-ink: #A99FFF; --accent-soft: rgba(143, 130, 255, 0.16);
+  --c1: #FF5C8A; --c2: #FF9F2E; --c3: #FFCB2E; --c4: #2FD487; --c5: #4AA8FF; --c6: #9B85FF; --c7: #F062D8;
+  --glass-shadow: none;
+}
+body::before, body::after { display: none; }
+
+/* brand: bright solid color, readable on light and dark */
+.brand { background: none; color: var(--c1); -webkit-text-fill-color: currentColor; }
+
+/* buttons: solid accent instead of rainbow gradients */
+.btn.primary, .chip[aria-pressed="true"], .bubble.me { background: var(--accent); box-shadow: none; }
+
+/* dropdown cards: plain card, color lives only in the dot */
+.fold, .sheet .fold { background: var(--surface); }
+.fold > summary::after { border-color: var(--muted); }
+.fold > summary::before { box-shadow: none; }
+
+/* stats and KPIs: plain boxes, each number in its own color */
+.stat { background: var(--surface-2); border-color: transparent; }
+.stat span { color: var(--muted); }
+.stat b { color: var(--hue); }
+.kpi:nth-child(6n+1) b { color: var(--c5); } .kpi:nth-child(6n+2) b { color: var(--c4); } .kpi:nth-child(6n+3) b { color: var(--c2); }
+.kpi:nth-child(6n+4) b { color: var(--c7); } .kpi:nth-child(6n+5) b { color: var(--c6); } .kpi:nth-child(6n) b { color: var(--c1); }
+
+/* SKU: soft tinted tag in the accent color, no heavy box */
+.sku { background: var(--accent-soft); color: var(--accent-ink); border: 0; border-radius: 6px; font-weight: 700; letter-spacing: .04em; }
+
+/* stage labels: light tint with colored text so each stage is easy to spot */
+.pill[class*="st-"], select[class*="st-"] { background: color-mix(in srgb, var(--sc-hue) 15%, transparent); color: color-mix(in srgb, var(--sc-hue) 70%, var(--ink)); border-color: transparent; font-weight: 700; }
+.box { background: color-mix(in srgb, var(--bx) 18%, transparent); }
