@@ -110,6 +110,8 @@ function goTab(k, dir) {
   m.classList.remove("swipe-l", "swipe-r"); if (dir) { void m.offsetWidth; m.classList.add(dir > 0 ? "swipe-l" : "swipe-r"); }
   render();
 }
+// Drop the slide class once it has played, so later re-renders don't replay it.
+document.addEventListener("animationend", e => { if (e.target.matches("#main > .wrap")) e.target.parentNode.classList.remove("swipe-l", "swipe-r"); });
 (() => {
   let x0 = null, y0 = 0, t0 = 0;
   const blocked = el => el.closest("input, textarea, select, .chips, .scroll-x, .photos, canvas, .pipe, [data-noswipe]");
