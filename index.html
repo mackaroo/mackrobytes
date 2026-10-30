@@ -53,7 +53,7 @@
 <script>
   // Only load the database library once config.js has real values; otherwise the app runs as a local preview.
   if (window.CONFIG && CONFIG.SUPABASE_URL && !CONFIG.SUPABASE_URL.startsWith("YOUR")) {
-    document.write('<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.0/dist/umd/supabase.js"><\/script><script src="store.js"><\/script>');
+    document.write('<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.0/dist/umd/supabase.js" integrity="sha384-xPW3QHswsICVC2mW6BFNwMbhpLkbZ133fKOhxNx3QGGgAOJfL3O9t8r2aWn1aez6" crossorigin="anonymous"><\/script><script src="store.js"><\/script>');
   }
 </script>
 <script src="features.js"></script>

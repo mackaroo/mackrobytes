@@ -84,9 +84,10 @@ function setSync(state, text) {
 }
 const COLLS = ["items", "audits", "expenses", "things", "donations"];
 function persistLocal() { try { const d = { settings: S.settings }; COLLS.forEach(c => d[c] = S[c]); localStorage.setItem("mb-local", JSON.stringify(d)); } catch {} }
+const storageFull = e => /quota|exceed|too large/i.test((e && e.message) || "");
 function dbErr(e) {
   if (e && /JWT|auth/i.test(e.message || "")) return "You've been signed out. Reload and sign in again.";
-  if (e && /quota|exceed|too large/i.test(e.message || "")) return "Storage is full. Delete old items or photos, then try again.";
+  if (storageFull(e)) return "Storage is full. Delete old items or photos, then try again.";
   return "Couldn't save. Check your connection and try again.";
 }
 // Write one document; every collection goes through here so all devices stay in sync.
@@ -336,7 +337,7 @@ async function addPhotos(id, files) {
   const added = [];
   for (const f of files) {
     try { const blob = await fileToJpeg(f); added.push({ id: await storePhoto(blob), at: Date.now() }); }
-    catch (e) { toast(e && e.code === "quota_exceeded" ? "Photo storage is full. Delete some old photos." : "A photo couldn't be saved. Try a different one."); }
+    catch (e) { toast(storageFull(e) ? "Photo storage is full. Delete some old photos." : "A photo couldn't be saved. Try a different one."); }
   }
   if (!added.length) return;
   const it = S.items[id]; const patch = { photos: [...(it.photos || []), ...added] };
@@ -563,7 +564,7 @@ const TOOLS = {
       <div id="drpOut">${dropsOut(v)}</div></section>`;
   },
   offer() {
-    return `<section class="card"><h2>Offer helper</h2>${offerBox(null, "t")}</section>`;
+    return `<section class="card"><h2>Offer helper</h2>${offerBox()}</section>`;
   },
   messages() {
     const items = Object.entries(S.items).sort((a, b) => (b[1].updatedAt || 0) - (a[1].updatedAt || 0));
@@ -713,40 +714,38 @@ const niceRound = x => x >= 20 ? Math.round(x) : Math.round(x * 2) / 2;
 function netAt(it, p, price) { const sp = shipPlan(it); const label = num(it.labelCost) ?? sp.cost ?? 0; const ship = it.freeShip ? 0 : (num(it.shipCharge) ?? label); return netFor(p, { price, ship, label, pkg: pkgCost(sp.pkg), cost: num(it.cost) || 0 }).net; }
 function offerCalc(it, plat, offer) {
   const list = listPrice(it, plat);
-  if (list == null) return { err: "Set a price for this item first." };
+  if (list == null) return { err: "Run a price check on this item first." };
   const floor = num(it.floor) ?? niceRound(list * 0.8); const guessed = num(it.floor) == null;
   let verdict, why, counter = null, tpl = "t4";
   if (offer >= list * 0.9 && offer >= floor) { verdict = "Accept"; why = "It's within 10% of your price and above your lowest."; tpl = null; }
   else if (offer >= floor) { counter = Math.max(offer, niceRound((offer + list) / 2)); verdict = "Counter at " + money(counter); why = "It's above your lowest, so accepting is fine too. Meeting in the middle usually lands."; }
   else if (offer >= floor * 0.7) { counter = Math.max(floor, niceRound((offer + list) / 2)); verdict = "Counter at " + money(counter); why = "It's below your lowest price, so don't accept it as is."; }
   else { counter = floor; verdict = "Decline politely"; why = "It's a lowball. Offer your lowest price instead."; tpl = "t6"; }
-  if (guessed) why += " Your lowest price is estimated at 80% of your price; set one for a better answer.";
+  if (guessed) why += " Your lowest is estimated at 80% of the price.";
   const t = tpl && templates().find(x => x.id === tpl);
   return { list, floor, verdict, why, counter, netOffer: netAt(it, plat, offer), netCounter: counter != null ? netAt(it, plat, counter) : null, msg: t ? fillTpl(t.text, it, { counter }) : null };
 }
-function offerHTML(it, plat, offer, key) {
-  if (!it) return `<p class="small muted">Add an item with a price to use this.</p>`;
+function offerHTML(it, plat, offer) {
+  if (!it) return `<p class="small muted">Add an item to use this.</p>`;
   if (offer == null) return `<p class="small muted">Enter their offer.</p>`;
   const r = offerCalc(it, plat, offer); if (r.err) return `<p class="small muted">${h(r.err)}</p>`;
   return `<div class="offer-res"><div class="verdict">${h(r.verdict)}</div><div class="small muted">${h(r.why)}</div>
     <table class="money"><tbody><tr><td>You keep at their offer</td><td class="${r.netOffer >= 0 ? "pos" : "neg"}">${money(r.netOffer)}</td></tr>${r.counter != null ? `<tr><td>You keep at ${money(r.counter)}</td><td class="pos">${money(r.netCounter)}</td></tr>` : ""}<tr><td>Your price · lowest</td><td>${money(r.list)} · ${money(r.floor)}</td></tr></tbody></table>
-    ${r.msg ? `<textarea id="offMsg-${key}" readonly class="small" style="min-height:110px">${h(r.msg)}</textarea><div class="btns"><button class="btn sm" data-act="copy" data-from="offMsg-${key}">Copy reply</button></div>` : ""}</div>`;
+    ${r.msg ? `<textarea id="offMsg" readonly class="small" style="min-height:110px">${h(r.msg)}</textarea><div class="btns"><button class="btn sm" data-act="copy" data-from="offMsg">Copy reply</button></div>` : ""}</div>`;
 }
-function offerBox(id, key) {
-  const st = key === "t" ? S.offerT : { item: id, amt: "", plat: "ebay" };
-  const items = Object.entries(S.items).filter(([, it]) => STAGE_IDX[it.stage || "intake"] <= 3);
-  const itemId = id || (S.items[st.item] ? st.item : (items[0] || [])[0]);
-  return `<div data-offbox="${key}" ${id ? `data-item="${h(id)}"` : ""} style="display:flex;flex-direction:column;gap:10px">
-    ${id ? "" : `<label class="f">Item<select data-offitem data-off="1">${items.length ? items.map(([k, it]) => `<option value="${h(k)}" ${k === itemId ? "selected" : ""}>${h((it.sku || k) + (it.name ? " · " + it.name : ""))}</option>`).join("") : `<option value="">No unsold items yet</option>`}</select></label>`}
+function offerBox() {
+  const st = S.offerT; const items = Object.entries(S.items).filter(([, it]) => STAGE_IDX[it.stage || "intake"] <= 3);
+  const itemId = S.items[st.item] ? st.item : (items[0] || [])[0];
+  return `<div data-offbox style="display:flex;flex-direction:column;gap:10px">
+    <label class="f">Item<select data-offitem data-off="1">${items.length ? items.map(([k, it]) => `<option value="${h(k)}" ${k === itemId ? "selected" : ""}>${h((it.sku || k) + (it.name ? " · " + it.name : ""))}</option>`).join("") : `<option value="">No unsold items yet</option>`}</select></label>
     <div class="grid2"><label class="f">Their offer $<input type="number" inputmode="decimal" step="0.01" data-offamt data-off="1" value="${h(st.amt)}"></label><label class="f">Platform<select data-offplat data-off="1">${Object.entries(PLAT).map(([k, n]) => `<option value="${k}" ${st.plat === k ? "selected" : ""}>${n}</option>`).join("")}</select></label></div>
-    <div data-offout>${offerHTML(S.items[itemId], st.plat, num(st.amt), key)}</div></div>`;
+    <div data-offout>${offerHTML(S.items[itemId], st.plat, num(st.amt))}</div></div>`;
 }
 function updateOffer(t) {
-  const box = t.closest("[data-offbox]"); if (!box) return; const key = box.dataset.offbox;
-  const sel = box.querySelector("[data-offitem]"); const id = box.dataset.item || (sel && sel.value);
-  const amt = box.querySelector("[data-offamt]").value, plat = box.querySelector("[data-offplat]").value;
-  if (key === "t") S.offerT = { item: id, amt, plat };
-  box.querySelector("[data-offout]").innerHTML = offerHTML(S.items[id], plat, num(amt), key);
+  const box = t.closest("[data-offbox]"); if (!box) return;
+  const id = box.querySelector("[data-offitem]").value, amt = box.querySelector("[data-offamt]").value, plat = box.querySelector("[data-offplat]").value;
+  S.offerT = { item: id, amt, plat };
+  box.querySelector("[data-offout]").innerHTML = offerHTML(S.items[id], plat, num(amt));
 }
 async function makeThumb(p) {
   try { const r = await fetch(await photoFetchUrl(p)); const bmp = await createImageBitmap(await r.blob()); const k = 160 / Math.max(bmp.width, bmp.height);
@@ -1012,7 +1011,7 @@ document.addEventListener("click", async e => {
     case "sold": markSold(); break;
     case "shipped": saveItem(S.open, { stage: "shipped", sale: { shippedAt: Date.now() } }); break;
     case "complete": saveItem(S.open, { stage: "complete", completedAt: Date.now() }); break;
-    case "unsell": { const sp = (S.items[S.open].sale || {}).platform; saveItem(S.open, { stage: "listed", sale: null, ...(sp ? { plat: { [sp]: { status: "listed" } } } : {}) }); break; }
+    case "unsell": { const sp = (S.items[S.open].sale || {}).platform; saveItem(S.open, { stage: "listed", sale: null, completedAt: null, ...(sp ? { plat: { [sp]: { status: "listed" } } } : {}) }); break; }
     case "del": $("#delConfirm").innerHTML = `<span class="small">Delete this item and its data?</span> <button class="btn sm danger" data-act="delYes">Yes, delete</button>`; break;
     case "delYes": { const id = S.open; const photos = S.items[id].photos || []; closeDetail(); await deleteItem(id); if (ASSETS) for (const p of photos) ASSETS.delete(p.id).catch(() => {}); toast("Item deleted"); break; }
     case "bundleAI": {
@@ -1045,7 +1044,7 @@ document.addEventListener("click", async e => {
     case "edAuto": edAuto(); break;
     case "edReset": ED.adj = edDefaults(); edSyncSliders(); edDraw(); break;
     case "edSave": edSave(t); break;
-    case "edDownload": edDownload(t); break;
+    case "edDownload": edDownload(); break;
     case "edCover": edCover(); break;
     case "edDelete": $("#edDel").innerHTML = `<button class="btn sm danger" data-act="edDeleteYes">Yes, delete photo</button>`; break;
     case "edDeleteYes": edDelete(); break;
@@ -1098,6 +1097,8 @@ document.addEventListener("change", async e => {
     const p = t.dataset.f; const it = S.items[S.open];
     let v = t.type === "checkbox" ? t.checked : t.dataset.num ? num(t.value) : t.value;
     let patch = pathPatch(p, v);
+    // Sold and Shipped need the sale details, so those go through Mark sold.
+    if (p === "stage" && STAGE_IDX[v] >= 4 && v !== "complete" && !it.sale) { t.value = it.stage || "intake"; toast("Use Mark sold at the bottom to record the sale."); const pr = $("#sPrice"); if (pr) { pr.scrollIntoView({ block: "center" }); pr.focus(); } return; }
     if (p === "costPre") patch.cost = v == null ? null : Math.round(v * (1 + (num(S.settings.buyTaxPct) ?? 6) / 100) * 100) / 100;
     if (p === "stage" && v === "complete") patch.completedAt = Date.now();
     if (/^plat\.\w+\.status$/.test(p)) { const pf = p.split(".")[1];
@@ -1218,7 +1219,7 @@ async function edSave(btn) {
     await saveItem(ED.id, { photos });
     if (ASSETS) ASSETS.delete(old.id).catch(() => {});
     closeEditor(); toast("Photo saved");
-  } catch (e) { btn.disabled = false; btn.textContent = "Save"; toast(e && e.code === "quota_exceeded" ? "Photo storage is full." : "Couldn't save the photo. Try again."); }
+  } catch (e) { btn.disabled = false; btn.textContent = "Save"; toast(storageFull(e) ? "Photo storage is full." : "Couldn't save the photo. Try again."); }
 }
 async function edApplyAll(btn) {
   if (!ED.bmp) return; btn.disabled = true;
@@ -1236,7 +1237,7 @@ async function edApplyAll(btn) {
   } catch (e) {
     // Remove the copies already uploaded, or they'd sit in storage unused.
     if (ASSETS) for (const m of made) ASSETS.delete(m).catch(() => {});
-    btn.disabled = false; btn.textContent = "Apply to all " + photos.length + " photos"; toast(e && e.code === "quota_exceeded" ? "Photo storage is full." : "Couldn't finish. No photos were changed."); }
+    btn.disabled = false; btn.textContent = "Apply to all " + photos.length + " photos"; toast(storageFull(e) ? "Photo storage is full." : "Couldn't finish. No photos were changed."); }
 }
 async function edDownload() {
   const blob = await toJpeg(edRender(2400, ED.adj, false));

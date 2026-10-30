@@ -107,8 +107,7 @@ textarea { resize: vertical; min-height: 84px; line-height: 1.5; }
 input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: 0; border-color: transparent; }
 .grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .grid3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
-.grid4 { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
-@media (max-width: 520px) { .grid4 { grid-template-columns: repeat(2, minmax(0, 1fr)); } .grid3 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 520px) { .grid3 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .check { display: flex; align-items: center; gap: 8px; font-size: 14px; }
 .check input { width: 20px; height: 20px; accent-color: var(--accent); }
 
@@ -157,12 +156,6 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
 .copyfield .lbl .sp { margin-left: auto; }
 .count { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .count.over { color: var(--bad); }
-.plat-h { display: flex; align-items: center; gap: 8px; padding-top: 6px; }
-.plat-h b { font-family: var(--f-display); font-weight: 700; font-size: 17px; }
-.pricegrid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
-@media (max-width: 460px) { .pricegrid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-.pricebox { background: var(--surface-2); border: 1px solid var(--line); border-radius: 12px; padding: 8px 10px; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-.pricebox input { font-weight: 700; font-variant-numeric: tabular-nums; }
 
 table.money { width: 100%; border-collapse: collapse; font-size: 14px; font-variant-numeric: tabular-nums; }
 table.money th, table.money td { padding: 7px 6px; text-align: right; border-bottom: 1px solid var(--line); white-space: nowrap; }
@@ -172,11 +165,6 @@ table.money tr.net td { font-weight: 800; border-bottom: 0; font-size: 15px; }
 .pos { color: var(--good); } .neg { color: var(--bad); }
 .scroll-x { overflow-x: auto; }
 
-.fit { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
-@media (max-width: 520px) { .fit { grid-template-columns: 1fr; } }
-.fitc { border: 1px solid var(--line); border-radius: 12px; padding: 10px; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-.fitc.best { border-color: var(--accent); background: var(--accent-soft); }
-.fitc.skip { opacity: .7; }
 
 .photos { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
 @media (max-width: 460px) { .photos { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
@@ -239,7 +227,7 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 2px 0; width: 100%; }
 .hello { font: 700 32px/1.1 var(--f-display); letter-spacing: -.025em; margin: 6px 0 2px; }
 .hello-sub { color: var(--muted); font-size: 14px; }
 
-.card, .modal-card, .tabs, .stat, .pricebox, .fitc, .offer-res, .bubble.ai {
+.card, .modal-card, .tabs, .stat, .offer-res, .bubble.ai {
   backdrop-filter: blur(18px) saturate(1.2); -webkit-backdrop-filter: blur(18px) saturate(1.2); }
 
 .tab.add-tab svg { width: 30px; height: 30px; }
@@ -542,7 +530,7 @@ body::before, body::after { display: none; }
 @media (hover: hover) and (pointer: fine) { .tool-tile:hover, .cmp-c:hover { border-color: var(--hue, var(--accent)); } }
 
 /* no blur: the clean theme uses flat surfaces, and backdrop-filter on every card made scrolling flicker */
-.card, .modal-card, .tabs, .stat, .pricebox, .fitc, .offer-res, .bubble.ai, .kpi, .sheet-top, [class*="tile"] {
+.card, .modal-card, .tabs, .stat, .offer-res, .bubble.ai, .kpi, .sheet-top, [class*="tile"] {
   backdrop-filter: none; -webkit-backdrop-filter: none; }
 .top.scrolled { backdrop-filter: none; -webkit-backdrop-filter: none; background: var(--sky-1); }
 

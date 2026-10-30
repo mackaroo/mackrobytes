@@ -582,6 +582,8 @@ document.addEventListener("input", e => {
 // Change an item's stage right from the home list without opening it.
 document.addEventListener("change", e => {
   const t = e.target, id = t.dataset && t.dataset.qstage; if (!id || !S.items[id]) return;
+  // Sold and Shipped need the sale details, so open the item at Mark sold instead.
+  if (STAGE_IDX[t.value] >= 4 && t.value !== "complete" && !S.items[id].sale) { t.value = S.items[id].stage || "intake"; openDetail(id); const pr = $("#sPrice"); if (pr) { pr.scrollIntoView({ block: "center" }); pr.focus(); } toast("Enter what it sold for, then Mark sold."); return; }
   saveItem(id, { stage: t.value, ...(t.value === "complete" ? { completedAt: Date.now() } : {}) }); t.blur();
   toast((S.items[id].sku || id) + " → " + stageName(t.value));
 });
