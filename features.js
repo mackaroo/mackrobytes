@@ -20,7 +20,7 @@ function useSku(sku) {
 }
 async function newItem(fields) {
   const sku = nextSku(), id = skuId(sku);
-  await saveItem(id, { sku, box: "hobby", stage: "intake", createdAt: Date.now(), ...fields }, { create: true });
+  await saveItem(id, { sku, box: "", stage: "intake", createdAt: Date.now(), ...fields }, { create: true });
   useSku(sku); return id;
 }
 async function quickAdd(text) {
@@ -263,7 +263,7 @@ async function garageLog(d) {
 }
 // Choosing "New bin…" (or "New spot…") in any dropdown asks for the name, before other change handlers see it.
 document.addEventListener("change", e => {
-  const t = e.target; if (t.tagName !== "SELECT" || t.value !== "__new") return;
+  const t = e.target; if (t.tagName !== "SELECT" || t.value !== "__new" || t.selectedOptions[0].hasAttribute("data-box")) return;
   const n = (prompt(t.querySelector('option[value="__new"]').textContent.replace("…", "") + " name:") || "").trim();
   if (!n) { e.stopImmediatePropagation(); t.value = ([...t.options].find(o => o.defaultSelected) || t.options[0]).value; return; }
   if (t.id === "sortBin") { e.stopImmediatePropagation(); switchBin(n); return; }
@@ -534,7 +534,7 @@ document.addEventListener("click", async e => {
   switch (t.dataset.act) {
     case "pcClear": PC.q = ""; PC.res = null; lsSet("mb-pc", "{}"); render(); break;
     case "pcAdd": { const r = PC.res; if (!r) break;
-      const id = await newItem({ name: r.identified || r.q, box: r.fragile ? "fragile" : "hobby", priceCheck: r, ...pcItemPatch(r) });
+      const id = await newItem({ name: r.identified || r.q, box: r.fragile ? "fragile" : "", priceCheck: r, ...pcItemPatch(r) });
       PC.q = ""; PC.res = null; lsSet("mb-pc", "{}");
       toast("Added " + S.items[id].sku, { label: "Open", fn: () => openDetail(id) }); break; }
     case "pcItem": { const it = S.open && S.items[S.open]; if (!it) break;
@@ -558,11 +558,11 @@ function homeListHTML() {
     (!q || [id, it.sku, it.name, it.brand, it.model, it.official].join(" ").toLowerCase().includes(q)))
     .sort((a, b) => (b[1].updatedAt || 0) - (a[1].updatedAt || 0));
   if (!rows.length) return `<div class="empty"><b>${Object.keys(S.items).length ? "Nothing here." : "No items yet."}</b></div>`;
-  return rows.map(([id, it]) => { const price = mainPrice(it);
-    return `<div class="inv-row" role="button" tabindex="0" data-act="open" data-id="${h(id)}">${thumb(it)}
-      <div style="min-width:0"><div class="t">${h(it.sku || id)}</div><div class="m">${it.name ? `<span class="small muted">${h(it.name)}</span>` : ""}${boxTag(it.box)}</div></div>
-      <select class="st-${h(it.stage || "intake")}" data-qstage="${h(id)}" data-act="noop" aria-label="Stage">${STAGES.map(([k, n]) => `<option value="${k}" ${(it.stage || "intake") === k ? "selected" : ""}>${n}</option>`).join("")}</select>
-      <div class="mono pr">${price != null ? money(price) : `<span class="muted">—</span>`}</div></div>`; }).join("");
+  // Just photo, SKU, box and stage: the name and price live on the item page.
+  return rows.map(([id, it]) => `<div class="inv-row" role="button" tabindex="0" data-act="open" data-id="${h(id)}">${thumb(it)}
+      <div class="t">${h(it.sku || id)}</div>
+      <div class="inv-sel"><select class="box-sel ${h(it.box || "none")}" data-qbox="${h(id)}" data-act="noop" aria-label="Box"${(ci => ci >= 0 ? ` style="--bx: var(--c${ci % 7 + 1})"` : "")(Object.keys(S.settings.boxes || {}).indexOf(it.box))}>${boxOpts(it.box || "", true)}</select>
+      <select class="st-${h(it.stage || "intake")}" data-qstage="${h(id)}" data-act="noop" aria-label="Stage">${STAGES.map(([k, n]) => `<option value="${k}" ${(it.stage || "intake") === k ? "selected" : ""}>${n}</option>`).join("")}</select></div></div>`).join("");
 }
 function homeInvHTML() {
   const all = Object.values(S.items); const n = k => all.filter(it => inHomeStage(it, k)).length;
@@ -588,6 +588,21 @@ document.addEventListener("change", e => {
   toast((S.items[id].sku || id) + " → " + stageName(t.value));
 });
 document.addEventListener("keydown", e => { if (e.key === "Enter" && e.target.matches && e.target.matches(".inv-row")) openDetail(e.target.dataset.id); });
+// "+ New box…" in any box dropdown: name it, save it to settings, then let the normal handler save the item's box.
+document.addEventListener("change", e => {
+  const t = e.target; if (t.tagName !== "SELECT" || t.value !== "__new" || !t.selectedOptions[0].hasAttribute("data-box")) return;
+  const prev = t.dataset.prev ?? ([...t.options].find(o => o.defaultSelected) || t.options[0]).value;
+  const name = (prompt("Name the new box (e.g. Bin 4, Garage shelf):") || "").trim();
+  if (!name) { t.value = prev; e.stopImmediatePropagation(); return; }
+  const have = Object.entries(boxes()).find(([, n]) => n.toLowerCase() === name.toLowerCase());
+  const key = have ? have[0] : "b" + Date.now().toString(36);
+  if (!have) saveSettings({ boxes: { ...(S.settings.boxes || {}), [key]: name } });
+  if (!have) t.add(new Option(name, key), t.options.length - 1); t.value = key; t.dataset.prev = key;
+}, true);
+document.addEventListener("change", e => {
+  const t = e.target, id = t.dataset && t.dataset.qbox; if (!id || !S.items[id]) return;
+  t.dataset.prev = t.value; saveItem(id, { box: t.value }); t.blur(); toast((S.items[id].sku || id) + " → " + boxName(t.value));
+});
 
 const SIDE_ICONS = {
   tools: '<path d="M14.5 6.5a4 4 0 0 1-5 5L5 16a1.8 1.8 0 0 0 2.5 2.5l4.5-4.5a4 4 0 0 1 5-5l-2.4 2.4-2.1-.4-.4-2.1z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" fill="none"/>',

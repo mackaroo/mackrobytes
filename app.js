@@ -1,6 +1,10 @@
 "use strict";
 /* ---------- constants ---------- */
-const BOXES = { fragile: "Fragile", hobby: "Hobby & Tech", soft: "Soft & Collectibles" };
+const BOX_BASE = { fragile: "Fragile", hobby: "Hobby & Tech", soft: "Soft & Collectibles" };
+// Built-in boxes plus any the user adds (saved in settings, so new boxes sync everywhere). "" means No box.
+const boxes = () => ({ ...BOX_BASE, ...(S.settings.boxes || {}) });
+const boxName = k => boxes()[k] || "No box";
+const boxOpts = (cur, add) => `<option value="" ${cur ? "" : "selected"}>No box</option>${Object.entries(boxes()).map(([k, n]) => `<option value="${h(k)}" ${cur === k ? "selected" : ""}>${h(n)}</option>`).join("")}${add ? `<option value="__new" data-box>+ New box…</option>` : ""}`;
 const STAGES = [["intake","Intake"],["photographed","Photographed"],["drafted","Drafted"],["listed","Listed"],["sold","Sold"],["shipped","Shipped"],["complete","Complete"]];
 const STAGE_IDX = Object.fromEntries(STAGES.map((s, i) => [s[0], i]));
 const PLAT = { ebay: "eBay", depop: "Depop", fb: "FB Marketplace" };
@@ -48,7 +52,7 @@ function deepMerge(a, b) {
   return o;
 }
 const skuId = s => { let id = String(s).trim().replace(/[^A-Za-z0-9_\-.~:@+]/g, "_").slice(0, 120); if (id === "." || id === "..") id = "_" + id; return id; };
-function parseBox(s) { s = String(s || "").toLowerCase(); if (s.startsWith("f")) return "fragile"; if (s.startsWith("h") || s.includes("tech")) return "hobby"; if (s.startsWith("s") || s.includes("collect")) return "soft"; return null; }
+function parseBox(s) { s = String(s || "").toLowerCase(); if (s.startsWith("f")) return "fragile"; if (s.startsWith("h") || s.includes("tech")) return "hobby"; if (s.startsWith("s") || s.includes("collect")) return "soft"; const c = Object.entries(S.settings.boxes || {}).find(([, n]) => n.toLowerCase().startsWith(s)); return c ? c[0] : null; }
 function md(t) {
   let html = h(t).split("\n").map(l => {
     if (/^#{1,4} /.test(l)) return "<h4>" + l.replace(/^#+ /, "") + "</h4>";
@@ -212,7 +216,7 @@ function ruleFindings() {
   for (const [id, it] of Object.entries(S.items)) {
     const nm = it.sku || id; const stg = STAGE_IDX[it.stage || "intake"]; const photos = (it.photos || []).length;
     const add = (sev, text, fix) => out.push({ id, sev, text: nm + ": " + text, fix });
-    if (it.stage === "sold") { const d = daysSince(it.sale && it.sale.date); const where = "Grab " + (it.sku || id) + " from the " + (BOXES[it.box] || "") + " box."; if (d != null && d >= (num(S.settings.handlingDays) || 1)) add("high", "sold " + d + " day(s) ago and not shipped yet", where + " Ship today to protect your handling-time metrics."); else add("med", "sold, ship within your handling time", where + " Print the label and pack it."); continue; }
+    if (it.stage === "sold") { const d = daysSince(it.sale && it.sale.date); const where = "Grab " + (it.sku || id) + (it.box ? " from the " + boxName(it.box) + " box." : "."); if (d != null && d >= (num(S.settings.handlingDays) || 1)) add("high", "sold " + d + " day(s) ago and not shipped yet", where + " Ship today to protect your handling-time metrics."); else add("med", "sold, ship within your handling time", where + " Print the label and pack it."); continue; }
     if (stg >= 4) continue;
     if (stg >= 1 && photos < 3) add("med", "only " + photos + " photo(s)", "Aim for 8–12: front, back, labels, flaws, scale.");
     if (stg >= 2 && !hasCopy(it, it.listOn)) add("med", "drafted but no listing text yet", "Pick where it's listing, then Write my listing.");
@@ -237,7 +241,7 @@ function profileText() {
     "- Ships from ZIP " + s.zip + " (" + s.city + "). Handling time: " + s.handlingDays + " business day(s).",
     "- Has a 4x6 thermal label printer, a scale, poly mailers, bubble mailers and boxes. Buys labels through each platform.",
     "- Takes every photo on an iPhone 15 Pro.",
-    "- Inventory is SKU-labeled and stored in three boxes: Fragile, Hobby & Tech, Soft & Collectibles.",
+    "- Inventory is SKU-labeled and stored in boxes: " + Object.values(boxes()).join(", ") + ".",
     "- Fees in use: eBay " + s.ebayFvfPct + "% final value fee on item + shipping + tax, plus $" + s.ebayOrderFeeHigh + " per order (" + "$" + s.ebayOrderFeeLow + " at $10 or less)" + (num(s.ebayAdPct) ? ", promoted listings " + s.ebayAdPct + "%" : "") + ". Depop: no selling fee, " + s.depopPct + "% + $" + s.depopFixed + " payment processing. FB Marketplace: free for local pickup; " + s.fbShipPct + "% (min $" + s.fbShipMin + ") when shipped.",
     "- Today is " + today() + "."
   ].join("\n");
@@ -245,7 +249,7 @@ function profileText() {
 function itemForAI(it, id) {
   const sp = shipPlan(it);
   return {
-    sku: it.sku || id, name: it.name, box: BOXES[it.box], brand: it.brand, category: it.category, condition: it.condition,
+    sku: it.sku || id, name: it.name, box: boxName(it.box), brand: it.brand, category: it.category, condition: it.condition,
     flawsAndConditionNotes: it.condNotes, included: it.included, costBasis: num(it.cost), weightOz: num(it.weightOz), dimsIn: it.dims,
     stage: it.stage, listingOn: it.listOn, marketValue: it.priceCheck ? { low: num(it.priceCheck.soldLow), typical: num(it.priceCheck.soldTypical), high: num(it.priceCheck.soldHigh) } : null, listedOn: Object.fromEntries(Object.entries(it.plat || {}).map(([p, x]) => [p, { status: x.status, daysListed: daysSince(x.listedAt) }])),
     engagement: it.engagement, soldCompsSellerFound: it.comps, shippingEstimate: { service: sp.service, packaging: PKG_NAME[sp.pkg], packedOz: sp.packedOz, labelCost: sp.cost },
@@ -379,13 +383,14 @@ function renderTabs() {
   const tl = $("#toolsBtn"); if (tl) { if (S.tab === "tools") tl.setAttribute("aria-current", "page"); else tl.removeAttribute("aria-current"); }
   const g = $("#gear"); if (g) { if (S.tab === "settings") g.setAttribute("aria-current", "page"); else g.removeAttribute("aria-current"); }
 }
-const boxTag = b => b ? `<span class="box ${b}"><i></i>${h(BOXES[b])}</span>` : "";
+const boxTag = b => { if (!b || !boxes()[b]) return ""; const ci = Object.keys(S.settings.boxes || {}).indexOf(b);
+  return `<span class="box ${h(b)}"${ci >= 0 ? ` style="--bx: var(--c${ci % 7 + 1})"` : ""}><i></i>${h(boxName(b))}</span>`; };
 const stageName = s => (STAGES.find(x => x[0] === (s || "intake")) || STAGES[0])[1];
 function thumb(it) { const p = (it.photos || [])[0]; return p ? `<img class="thumb" src="${h(photoSrc(p))}" alt="" loading="lazy">` : it.thumb ? `<img class="thumb" src="${h(it.thumb)}" alt="">` : `<div class="thumb">${it.shot ? "#" + it.shot : "no photo"}</div>`; }
 function itemListHTML() {
   const F = S.filter; const q = F.q.toLowerCase();
   const rows = Object.entries(S.items).filter(([id, it]) =>
-    (F.box === "all" || it.box === F.box) && (F.bin === "all" || (it.bin || "") === F.bin) && (F.stage === "all" || (F.stage === "tolist" ? STAGE_IDX[it.stage || "intake"] <= 2 : (it.stage || "intake") === F.stage)) &&
+    (F.box === "all" || (F.box === "none" ? !it.box : it.box === F.box)) && (F.bin === "all" || (it.bin || "") === F.bin) && (F.stage === "all" || (F.stage === "tolist" ? STAGE_IDX[it.stage || "intake"] <= 2 : (it.stage || "intake") === F.stage)) &&
     (!q || [id, it.sku, it.name, it.brand, it.model, it.official, it.listing && it.listing.ebayTitle, it.shot ? "#" + it.shot : ""].join(" ").toLowerCase().includes(q)));
   const by = { new: (a, b) => (b.updatedAt || 0) - (a.updatedAt || 0), old: (a, b) => (a.createdAt || 0) - (b.createdAt || 0),
     hi: (a, b) => (mainPrice(b) ?? -1) - (mainPrice(a) ?? -1), lo: (a, b) => (mainPrice(a) ?? 1e9) - (mainPrice(b) ?? 1e9),
@@ -397,7 +402,7 @@ function itemListHTML() {
 function itemFiltersHTML(F) {
   const sel = (k, opts) => `<label class="f">${opts.label}<select data-filt="${k}">${opts.list.map(([v, n]) => `<option value="${h(v)}" ${F[k] === v ? "selected" : ""}>${h(n)}</option>`).join("")}</select></label>`;
   const bins = knownBins();
-  return `<div class="filters">${sel("box", { label: "Box", list: [["all", "All boxes"], ...Object.entries(BOXES)] })}${sel("stage", { label: "Stage", list: [["all", "Any stage"], ["tolist", "To list"], ...STAGES] })}
+  return `<div class="filters">${sel("box", { label: "Box", list: [["all", "All boxes"], ["none", "No box"], ...Object.entries(boxes())] })}${sel("stage", { label: "Stage", list: [["all", "Any stage"], ["tolist", "To list"], ...STAGES] })}
     ${bins.length ? sel("bin", { label: "Came from", list: [["all", "Any bin"], ...bins.map(b => [b, b])] }) : ""}${sel("sort", { label: "Sort by", list: [["new", "Recently changed"], ["old", "Oldest first"], ["hi", "Price: high to low"], ["lo", "Price: low to high"], ["sku", "SKU"], ["name", "Name A–Z"], ["shot", "Camera photo #"]] })}</div>`;
 }
 function itemRow(id, it) {
@@ -457,7 +462,7 @@ const VIEWS = {
     ${fold("addPile", "Sort a pile", `<div class="btns"><button class="btn primary" data-act="thingCam">Snap photos</button><button class="btn" data-act="tab" data-v="sort">Go to Sort</button></div>`)}
     ${fold("addOne", "One item", `
       <div class="grid2"><label class="f">SKU<input type="text" id="aSku" autocapitalize="characters" value="${h(nextSku())}"></label>
-      <label class="f">Box<select id="aBox">${Object.entries(BOXES).map(([k, n]) => `<option value="${k}">${h(n)}</option>`).join("")}</select></label></div>
+      <label class="f">Box<select id="aBox">${boxOpts("", true)}</select></label></div>
       <label class="f">What is it?<input type="text" id="aName" placeholder="e.g. Nintendo DS Lite, cobalt blue"></label>
       <div class="btns"><button class="btn primary" data-act="addOne">Add and take photos</button><button class="btn" data-act="addOne" data-v="stay">Add another</button></div>`)}
     ${fold("addBulk", "Paste a list", `
@@ -479,7 +484,7 @@ const VIEWS = {
     const now = new Date(); const months = [];
     for (let i = 5; i >= 0; i--) { const m0 = new Date(now.getFullYear(), now.getMonth() - i, 1), m1 = new Date(now.getFullYear(), now.getMonth() - i + 1, 1);
       months.push({ l: m0.toLocaleDateString(undefined, { month: "short" }), now: i === 0, v: salesIn(+m0, +m1).reduce((t, x) => t + (num(x.s.net) || 0), 0) - expensesIn(+m0, +m1).filter(x => x.e.type !== "mileage").reduce((t, x) => t + x.ded, 0) }); }
-    const byPlat = groupSales(sales, x => x.s.local ? "fblocal" : x.s.platform), byBox = groupSales(sales, x => x.it.box || "hobby");
+    const byPlat = groupSales(sales, x => x.s.local ? "fblocal" : x.s.platform), byBox = groupSales(sales, x => x.it.box || "");
     const platName = k => k === "fblocal" ? "FB local" : PLAT[k] || k;
     const top = [...sales].sort((x, y) => (y.s.net || 0) - (x.s.net || 0)).slice(0, 5);
     const exList = Object.entries(S.expenses).sort((x, y) => (y[1].date || "").localeCompare(x[1].date || "")).slice(0, 40);
@@ -496,7 +501,7 @@ const VIEWS = {
     </section>
     ${fold("m6", "Last 6 months", barChart(months))}
     ${fold("byPlat", "By platform", brk(Object.entries(byPlat), platName))}
-    ${fold("byBox", "By box", brk(Object.entries(byBox), k => BOXES[k] || k))}
+    ${fold("byBox", "By box", brk(Object.entries(byBox), boxName))}
     ${top.length ? fold("best", "Best sales", `<div class="list">${top.map(x => `<button class="row-item" data-act="open" data-id="${h(x.id)}">${thumb(x.it)}<div style="min-width:0"><div class="t">${h(x.it.sku || x.id)}</div><div class="m">${x.it.name ? `<span class="small muted">${h(x.it.name)}</span>` : ""}<span class="small muted">${h(platName(x.s.local ? "fblocal" : x.s.platform))}</span></div></div><div class="r"><b class="num pos">${money(x.s.net)}</b><div class="small muted">sold ${money(num(x.s.price))}</div></div></button>`).join("")}</div>`) : ""}
     ${fold("exp", "Expenses & mileage", `
       <div class="grid2"><label class="f">Type<select data-pick="expType"><option value="expense" ${mileage ? "" : "selected"}>Expense</option><option value="mileage" ${mileage ? "selected" : ""}>Mileage</option></select></label><label class="f">Date<input type="date" id="exDate" value="${today()}"></label></div>
@@ -610,7 +615,7 @@ const TOOLS = {
     const v = S.shipCalc || (S.shipCalc = { weightOz: 10, box: "hobby", flat: false, media: false });
     const sp = shipPlan(v);
     return `<section class="card"><h2>Quick shipping estimate</h2>
-      <div class="grid2"><label class="f">Item weight (oz)<input type="number" inputmode="decimal" data-ship="weightOz" value="${h(v.weightOz)}"></label><label class="f">Box<select data-ship="box">${Object.entries(BOXES).map(([k, n]) => `<option value="${k}" ${v.box === k ? "selected" : ""}>${n}</option>`).join("")}</select></label></div>
+      <div class="grid2"><label class="f">Item weight (oz)<input type="number" inputmode="decimal" data-ship="weightOz" value="${h(v.weightOz)}"></label><label class="f">Box<select data-ship="box">${Object.entries(BOX_BASE).map(([k, n]) => `<option value="${k}" ${v.box === k ? "selected" : ""}>${n}</option>`).join("")}</select></label></div>
       <div class="btns"><label class="check"><input type="checkbox" data-ship="flat" ${v.flat ? "checked" : ""}> Flat card / coin / stamp</label><label class="check"><input type="checkbox" data-ship="media" ${v.media ? "checked" : ""}> Book / CD / DVD</label></div>
       <div class="stats"><div class="stat"><b>${money(sp.cost)}</b><span>${h(sp.service)}</span></div><div class="stat"><b>${sp.packedOz ?? "—"} oz</b><span>packed weight</span></div><div class="stat"><b>${h(PKG_NAME[sp.pkg])}</b><span>packaging</span></div></div>
       ${sp.notes.length ? `<ul class="small">${sp.notes.map(n => `<li>${h(n)}</li>`).join("")}</ul>` : ""}
@@ -874,7 +879,7 @@ function renderDetail() {
     </section>
 
     ${fold("dDetails", "Details", `
-      <div class="grid2"><label class="f">Box<select data-f="box">${Object.entries(BOXES).map(([k, n]) => `<option value="${k}" ${it.box === k ? "selected" : ""}>${n}</option>`).join("")}</select></label>
+      <div class="grid2"><label class="f">Box<select data-f="box">${boxOpts(it.box, true)}</select></label>
       <label class="f">Condition<select data-f="condition"><option value="">Choose…</option>${CONDITIONS.map(c => `<option ${it.condition === c ? "selected" : ""}>${h(c)}</option>`).join("")}</select></label>
       ${fld(it, "brand", "Brand", { ph: "Blank if unknown" })}${fld(it, "model", "Model #")}</div>
       ${lookupInfoHTML(it)}
@@ -889,7 +894,7 @@ function renderDetail() {
     ${fold("dListing", "Listing", listingHTML(it), { open: true, badge: it.listOn ? `<span class="muted small">${h(platName4(it.listOn))}</span>` : "" })}
 
     <section class="card"><h2>Sale</h2>
-      ${it.sale && it.stage === "sold" ? `<div class="pick"><span>Grab</span><span class="big">${h(it.sku || id)}</span><span>from the</span>${boxTag(it.box)}<span>box</span></div>` : ""}
+      ${it.sale && it.stage === "sold" ? `<div class="pick"><span>Grab</span><span class="big">${h(it.sku || id)}</span>${it.box ? `<span>from the</span>${boxTag(it.box)}<span>box</span>` : ""}</div>` : ""}
       ${it.sale ? `<p class="small">Sold on <b>${h(PLAT[it.sale.platform])}</b> for <span class="mono">${money(num(it.sale.price))}</span> on ${new Date(it.sale.date).toLocaleDateString()}. Net <b class="mono ${it.sale.net >= 0 ? "pos" : "neg"}">${money(it.sale.net)}</b>.${it.sale.shippedAt ? " Shipped " + new Date(it.sale.shippedAt).toLocaleDateString() + "." : ""}</p>
         ${fld(it, "sale.tracking", "Tracking number")}
         <div class="btns">${it.stage === "sold" ? `<button class="btn primary" data-act="shipped">Mark shipped</button>` : ""}${it.stage === "shipped" ? `<button class="btn primary" data-act="complete">Mark complete</button>` : ""}<button class="btn ghost" data-act="unsell">Undo sale</button></div>
@@ -1001,7 +1006,7 @@ document.addEventListener("click", async e => {
       for (const l of lines) { const parts = l.split(/\t|,/).map(x => x.trim()); const sku = parts[0]; if (!sku || /^sku$/i.test(sku)) continue;
         const id = skuId(sku); if (S.items[id]) { skip++; continue; }
         let box = parseBox(parts[parts.length - 1]); let name = parts.slice(1, box && parts.length > 2 ? -1 : undefined).join(", ");
-        await saveItem(id, { sku, name, box: box || "hobby", stage: "intake", createdAt: Date.now() }, { create: true }); useSku(sku); n++; }
+        await saveItem(id, { sku, name, box: box || "", stage: "intake", createdAt: Date.now() }, { create: true }); useSku(sku); n++; }
       toast("Imported " + n + " item(s)" + (skip ? ", skipped " + skip + " existing" : "")); $("#aBulk").value = ""; break; }
     case "cam": $("#camIn").click(); break;
     case "lib": $("#libIn").click(); break;
