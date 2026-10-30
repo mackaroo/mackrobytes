@@ -380,3 +380,57 @@ details.card.fold { display: block; padding: 0; }
   .grid2 { gap: 12px; }
 }
 @media (min-width: 1400px) { .wrap { max-width: 1080px; } }
+
+/* ---------- color pass: a rainbow of soft hues layered over the lavender base ---------- */
+:root { --c1: #F0759A; --c2: #F59A52; --c3: #E5B532; --c4: #34B087; --c5: #3FA3E6; --c6: #8C7BF2; --c7: #C774E0; }
+
+/* extra colored glows in the sky */
+body::before { content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none;
+  background: radial-gradient(40vmax 40vmax at 0% 0%, rgba(240, 117, 154, .28), transparent 70%),
+              radial-gradient(45vmax 45vmax at 100% 35%, rgba(63, 163, 230, .22), transparent 70%),
+              radial-gradient(40vmax 40vmax at 20% 100%, rgba(52, 176, 135, .2), transparent 70%); }
+
+.brand { background: linear-gradient(90deg, var(--c1), var(--c6) 55%, var(--c5)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.season { background: linear-gradient(90deg, var(--c2), var(--c1)); color: #fff; }
+.hello { background: linear-gradient(90deg, var(--c1), var(--c6), var(--c5)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.eyebrow { color: var(--accent-ink); }
+
+/* each tab gets its own color */
+.tab[data-v="today"] { --hue: var(--c1); } .tab[data-v="items"] { --hue: var(--c5); } .tab[data-v="sort"] { --hue: var(--c4); } .tab[data-v="profit"] { --hue: var(--c2); }
+.tab:not(.add-tab) svg { color: var(--hue); }
+.tab[aria-current="page"]:not(.add-tab) { color: var(--ink); background: color-mix(in srgb, var(--hue) 22%, transparent); }
+.tab.add-tab .fab { background: linear-gradient(135deg, var(--c1), var(--c6)); }
+.gear#toolsBtn { color: var(--c2); } .gear#gear { color: var(--c5); }
+
+/* dropdown cards cycle through the hues: colored dot, tinted glass, colored chevron */
+.fold:nth-of-type(7n+1) { --hue: var(--c6); } .fold:nth-of-type(7n+2) { --hue: var(--c1); } .fold:nth-of-type(7n+3) { --hue: var(--c4); } .fold:nth-of-type(7n+4) { --hue: var(--c2); }
+.fold:nth-of-type(7n+5) { --hue: var(--c5); } .fold:nth-of-type(7n+6) { --hue: var(--c7); } .fold:nth-of-type(7n) { --hue: var(--c3); }
+.fold { background: color-mix(in srgb, var(--hue) 10%, var(--surface)); }
+.fold > summary::before { content: ""; flex: none; width: 10px; height: 10px; border-radius: 50%; background: var(--hue); box-shadow: 0 0 0 4px color-mix(in srgb, var(--hue) 22%, transparent); }
+.fold > summary::after { border-color: var(--hue); }
+.sheet .fold { background: color-mix(in srgb, var(--hue) 8%, color-mix(in srgb, var(--surface-solid) 88%, transparent)); }
+
+/* pipeline stages and stat boxes */
+.pipe button:nth-child(1) { --hue: var(--c6); } .pipe button:nth-child(2) { --hue: var(--c5); } .pipe button:nth-child(3) { --hue: var(--c4); } .pipe button:nth-child(4) { --hue: var(--c3); }
+.pipe button:nth-child(5) { --hue: var(--c2); } .pipe button:nth-child(6) { --hue: var(--c1); } .pipe button:nth-child(7) { --hue: var(--c7); }
+.pipe button.has { border-top-color: var(--hue); }
+.pipe button.has b { color: var(--hue); }
+.stat:nth-child(4n+1) { --hue: var(--c4); } .stat:nth-child(4n+2) { --hue: var(--c5); } .stat:nth-child(4n+3) { --hue: var(--c1); } .stat:nth-child(4n) { --hue: var(--c2); }
+.stat { background: color-mix(in srgb, var(--hue) 16%, var(--surface-2)); border-color: color-mix(in srgb, var(--hue) 35%, transparent); }
+.stat span { color: color-mix(in srgb, var(--hue) 45%, var(--ink)); }
+
+/* tiles get a soft wash of their decision color */
+.tile { background: linear-gradient(160deg, color-mix(in srgb, var(--dc, var(--accent)) 34%, var(--surface)), var(--surface) 80%); }
+
+/* breakdown bars and chips */
+.brk:nth-child(6n+1) .hbar { background: var(--c6); } .brk:nth-child(6n+2) .hbar { background: var(--c5); } .brk:nth-child(6n+3) .hbar { background: var(--c4); }
+.brk:nth-child(6n+4) .hbar { background: var(--c2); } .brk:nth-child(6n+5) .hbar { background: var(--c1); } .brk:nth-child(6n) .hbar { background: var(--c7); }
+.bar { fill: var(--c6); } .bar.now { fill: var(--c1); } .bar.neg { fill: var(--bad); }
+.chip[aria-pressed="true"] { background: linear-gradient(135deg, var(--c1), var(--c6)); }
+.pill.on { background: color-mix(in srgb, var(--c5) 20%, transparent); color: var(--ink); }
+
+/* buttons, goal card, thumbs */
+.btn.primary { background: linear-gradient(135deg, var(--c1) 0%, var(--c6) 55%, var(--c5) 100%); color: #fff; box-shadow: 0 6px 16px rgba(240, 117, 154, .3); }
+.goal { background: linear-gradient(135deg, var(--c1) 0%, var(--c6) 50%, var(--c5) 100%); }
+.thumb { background: linear-gradient(135deg, color-mix(in srgb, var(--c5) 22%, var(--surface-2)), color-mix(in srgb, var(--c7) 22%, var(--surface-2))); }
+.bubble.me { background: linear-gradient(135deg, var(--c6), var(--c5)); color: #fff; }
