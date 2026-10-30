@@ -385,7 +385,7 @@ function itemListHTML() {
     name: (a, b) => (a.name || "").localeCompare(b.name || ""), shot: (a, b) => (a.shot ?? 1e9) - (b.shot ?? 1e9) }[F.sort] || ((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
   rows.sort((a, b) => by(a[1], b[1]));
   return rows.length ? `<div class="list">${rows.map(([id, it]) => itemRow(id, it)).join("")}</div>` :
-    `<div class="empty"><b>${Object.keys(S.items).length ? "Nothing matches these filters." : "No items yet."}</b><span class="small">Add items one at a time or paste your whole SKU list on the Add tab.</span><button class="btn primary" data-act="tab" data-v="add">Add items</button></div>`;
+    `<div class="empty"><b>${Object.keys(S.items).length ? "No matches." : "No items yet."}</b><button class="btn primary" data-act="tab" data-v="add">Add items</button></div>`;
 }
 function itemFiltersHTML(F) {
   const sel = (k, opts) => `<label class="f">${opts.label}<select data-filt="${k}">${opts.list.map(([v, n]) => `<option value="${h(v)}" ${F[k] === v ? "selected" : ""}>${h(n)}</option>`).join("")}</select></label>`;
@@ -413,10 +413,9 @@ const VIEWS = {
     const toPack = items.filter(([, it]) => it.stage === "sold");
     const f = ruleFindings().filter(x => S.items[x.id] && S.items[x.id].stage !== "sold"); const audit = S.audits[today()];
     const latest = Object.values(S.audits).sort((a, b) => (b.date || "").localeCompare(a.date || ""))[0];
-    const hr = new Date().getHours();
     return `
-    ${LOCAL ? `<div class="banner">Preview mode: changes stay in this browser and photos aren't saved. Add your Supabase details to config.js to sync across your iPhone, Mac and PC.</div>` : ""}
-    <div><div class="hello">Hello, ${h(s.ownerName || "Mackenzie")}.</div><div class="hello-sub">Today is ${new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })} · good ${hr < 12 ? "morning" : hr < 18 ? "afternoon" : "evening"}</div></div>
+    ${LOCAL ? `<div class="banner">Preview mode · changes stay in this browser</div>` : ""}
+    <div><div class="hello">Hello, ${h(s.ownerName || "Mackenzie")}.</div><div class="hello-sub">${new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}</div></div>
     ${goalCardHTML()}
     ${quickAddHTML()}
     ${priceCheckCardHTML()}
@@ -426,47 +425,41 @@ const VIEWS = {
       <button class="tile d-donate" data-act="stagejump" data-v="sold"><span class="blob"></span><b>${counts.sold}</b><span>To ship</span></button>
       <button class="tile d-storage" data-act="tab" data-v="sort"><span class="blob"></span><b>${undecided().length}</b><span>To sort</span></button>
     </div>
-    ${toPack.length ? `<section class="card"><div class="card-h"><h2>To pack</h2><span class="sp pill warn">${toPack.length}</span></div><div class="list">${toPack.map(([id, it]) => `<button class="row-item" data-act="open" data-id="${h(id)}">${thumb(it)}<div style="min-width:0"><div class="t">${h(it.name || id)}</div><div class="m"><span class="small muted">Grab</span><span class="sku">${h(it.sku || id)}</span><span class="small muted">from</span>${boxTag(it.box)}</div></div><div class="r small muted">${h(PLAT[(it.sale || {}).platform] || "")}<br>${daysSince((it.sale || {}).date) ? daysSince(it.sale.date) + "d ago" : it.sale ? "today" : ""}</div></button>`).join("")}</div></section>` : ""}
-    <section class="card"><div class="card-h"><h2>Pipeline</h2><span class="sp muted small">${items.length} items</span></div>
+    ${toPack.length ? fold("pack", "To pack", `<div class="list">${toPack.map(([id, it]) => `<button class="row-item" data-act="open" data-id="${h(id)}">${thumb(it)}<div style="min-width:0"><div class="t">${h(it.name || id)}</div><div class="m"><span class="small muted">Grab</span><span class="sku">${h(it.sku || id)}</span><span class="small muted">from</span>${boxTag(it.box)}</div></div><div class="r small muted">${h(PLAT[(it.sale || {}).platform] || "")}<br>${daysSince((it.sale || {}).date) ? daysSince(it.sale.date) + "d ago" : it.sale ? "today" : ""}</div></button>`).join("")}</div>`, { open: true, badge: `<span class="pill warn">${toPack.length}</span>` }) : ""}
+    ${fold("pipe", "Pipeline", `
       <div class="pipe">${STAGES.map(([k, n]) => `<button class="${counts[k] ? "has" : ""}" data-act="stagejump" data-v="${k}"><b>${counts[k]}</b><span>${n}</span></button>`).join("")}</div>
-      <div class="stats"><div class="stat"><b>${money(listedVal)}</b><span>listed value</span></div><div class="stat"><b>${soldMonth.length}</b><span>sold this month</span></div><div class="stat"><b>${money(netMonth)}</b><span>net this month</span></div></div>
-    </section>
-    <section class="card"><div class="card-h"><h2>Needs attention</h2><span class="sp pill ${f.length ? "warn" : "on"}">${f.length ? f.length + " to fix" : "All clear"}</span></div>
-      ${f.length ? `<div>${f.slice(0, 12).map(x => `<div class="finding"><span class="sev ${x.sev}"></span><div style="min-width:0"><div class="small" style="font-weight:700">${h(x.text)}</div><div class="small muted">${h(x.fix)}</div></div><button class="btn sm" data-act="open" data-id="${h(x.id)}">Open</button></div>`).join("")}</div>` : `<p class="muted small">${items.length ? "No problems found in your listings." : "Add your first item to start getting checks."}</p>`}
-    </section>
-    <section class="card"><div class="card-h"><h2>Daily audit</h2><span class="sp muted small">${audit ? "Today's audit is ready" : latest ? "Last run " + h(latest.date) : "Not run yet"}</span></div>
-      <p class="small muted">Claude reviews your whole inventory and gives you today's top moves: pricing, crosslisting, stale listings and visibility.</p>
+      <div class="stats"><div class="stat"><b>${money(listedVal)}</b><span>listed value</span></div><div class="stat"><b>${soldMonth.length}</b><span>sold this month</span></div><div class="stat"><b>${money(netMonth)}</b><span>net this month</span></div></div>`, { open: true, badge: `<span class="muted small">${items.length} items</span>` })}
+    ${fold("attn", "Needs attention", `
+      ${f.length ? `<div>${f.slice(0, 12).map(x => `<div class="finding"><span class="sev ${x.sev}"></span><div style="min-width:0"><div class="small" style="font-weight:700">${h(x.text)}</div><div class="small muted">${h(x.fix)}</div></div><button class="btn sm" data-act="open" data-id="${h(x.id)}">Open</button></div>`).join("")}</div>` : `<p class="muted small">Nothing to fix.</p>`}`, { badge: `<span class="pill ${f.length ? "warn" : "on"}">${f.length || "All clear"}</span>` })}
+    ${fold("audit", "Daily audit", `
       <div class="btns"><button class="btn primary" data-act="audit" ${items.length ? "" : "disabled"}>${audit ? "Run again" : "Run today's audit"}</button></div>
-      <div id="auditOut" class="ai-out">${(audit || latest) ? md((audit || latest).text) : ""}</div>
-    </section>`;
+      <div id="auditOut" class="ai-out">${(audit || latest) ? md((audit || latest).text) : ""}</div>`, { badge: `<span class="muted small">${audit ? "Ready" : latest ? h(latest.date) : ""}</span>` })}`;
   },
   items() {
     const F = S.filter;
     return `<div class="card-h"><h1>Items</h1><button class="btn sm primary sp" data-act="tab" data-v="add">Add item</button></div>
-      <input type="text" id="q" placeholder="Search SKU, name, brand" value="${h(F.q)}" aria-label="Search items" data-act-input="search">
-      ${itemFiltersHTML(F)}
+      <input type="search" id="q" placeholder="Search" value="${h(F.q)}" aria-label="Search items" data-act-input="search">
+      ${fold("filters", "Filter & sort", itemFiltersHTML(F), { cls: "slim", badge: (n => n ? `<span class="pill on">${n}</span>` : "")(["box", "stage", "bin"].filter(k => F[k] !== "all").length) })}
       ${lookupCardHTML()}
       <section class="card" id="itemList">${itemListHTML()}</section>`;
   },
   add() {
     return `<h1>Add items</h1>
-    <section class="card"><h2>Quick add</h2><p class="small muted" style="margin:0">Type what it is and an optional price. It gets the next SKU automatically.</p>${quickAddHTML()}</section>
-    <section class="card"><h2>Sorting a pile?</h2><p class="small muted" style="margin:0">Snap a photo of each thing, then swipe to decide: keep, sell, donate or trash.</p><div class="btns"><button class="btn primary" data-act="thingCam">Snap photos to sort</button><button class="btn" data-act="tab" data-v="sort">Go to Sort</button></div></section>
-    <section class="card"><h2>One item</h2>
+    ${fold("addQuick", "Quick add", quickAddHTML(), { open: true })}
+    ${fold("addPile", "Sort a pile", `<div class="btns"><button class="btn primary" data-act="thingCam">Snap photos</button><button class="btn" data-act="tab" data-v="sort">Go to Sort</button></div>`)}
+    ${fold("addOne", "One item", `
       <div class="grid2"><label class="f">SKU<input type="text" id="aSku" autocapitalize="characters" value="${h(nextSku())}"></label>
       <label class="f">Box<select id="aBox">${Object.entries(BOXES).map(([k, n]) => `<option value="${k}">${h(n)}</option>`).join("")}</select></label></div>
       <label class="f">What is it?<input type="text" id="aName" placeholder="e.g. Nintendo DS Lite, cobalt blue"></label>
-      <div class="btns"><button class="btn primary" data-act="addOne">Add and take photos</button><button class="btn" data-act="addOne" data-v="stay">Add another</button></div>
-    </section>
-    <section class="card"><h2>Paste your SKU list</h2>
-      <p class="small muted">One item per line: <span class="mono">SKU, name, box</span>. Box can be fragile, hobby or soft. Copy rows straight from a spreadsheet; tabs work too.</p>
+      <div class="btns"><button class="btn primary" data-act="addOne">Add and take photos</button><button class="btn" data-act="addOne" data-v="stay">Add another</button></div>`)}
+    ${fold("addBulk", "Paste a list", `
+      <p class="small muted" style="margin:0"><span class="mono">SKU, name, box</span> per line</p>
       <textarea id="aBulk" class="mono small" placeholder="FR-001, Pyrex mixing bowl, fragile&#10;HT-014, Logitech MX Master 3, hobby&#10;SC-203, Patagonia fleece size M, soft"></textarea>
-      <button class="btn primary" data-act="addBulk">Import list</button>
-    </section>`;
+      <button class="btn primary" data-act="addBulk">Import list</button>`)}`;
   },
   tools() {
     const t = S.tools; const tabs = [["fees", "Fees"], ["offer", "Offers"], ["messages", "Messages"], ["bundle", "Bundles"], ["ship", "Shipping"], ["boost", "Grow"], ["ask", "Ask Claude"]];
-    return `<h1>Tools</h1><div class="chips">${tabs.map(([k, n]) => `<button class="chip" data-act="tool" data-v="${k}" aria-pressed="${t === k}">${n}</button>`).join("")}</div>` + TOOLS[t]();
+    return `<div class="card-h"><h1>Tools</h1><select class="sp pick-sel" data-pick="tool" aria-label="Tool">${tabs.map(([k, n]) => `<option value="${k}" ${t === k ? "selected" : ""}>${n}</option>`).join("")}</select></div>` + TOOLS[t]();
   },
   profit() {
     const [a, b, label] = periodRange(S.period); const sales = salesIn(+a, +b); const ex = expensesIn(+a, +b);
@@ -484,55 +477,47 @@ const VIEWS = {
     const exList = Object.entries(S.expenses).sort((x, y) => (y[1].date || "").localeCompare(x[1].date || "")).slice(0, 40);
     const mileage = S.exp.type === "mileage";
     const brk = (rows, nm) => { const mx = Math.max(1, ...rows.map(r => Math.abs(r[1].net))); return rows.length ? rows.map(([k, r]) => `<div class="brk"><span>${h(nm(k))}</span><div class="hbar" style="width:${Math.max(2, Math.abs(r.net) / mx * 100)}%"></div><span class="num">${money(r.net)} <span class="muted">· ${r.n}</span></span></div>`).join("") : `<p class="small muted">No sales in this period.</p>`; };
-    return `<h1>Profit</h1>
-    <div class="chips">${[["month", "This month"], ["last", "Last month"], ["ytd", "This year"], ["all", "All time"]].map(([k, n]) => `<button class="chip" data-act="period" data-v="${k}" aria-pressed="${S.period === k}">${n}</button>`).join("")}</div>
-    <section class="card"><div class="eyebrow">${h(label)}</div>
+    return `<div class="card-h"><h1>Profit</h1><select class="sp pick-sel" data-pick="period" aria-label="Period">${[["month", "This month"], ["last", "Last month"], ["ytd", "This year"], ["all", "All time"]].map(([k, n]) => `<option value="${k}" ${S.period === k ? "selected" : ""}>${n}</option>`).join("")}</select></div>
+    <section class="card">
       <div class="stats four"><div class="stat"><b class="${profit >= 0 ? "" : "neg"}">${money(profit)}</b><span>profit after expenses</span></div><div class="stat"><b>${sales.length}</b><span>items sold</span></div><div class="stat"><b>${money(gross)}</b><span>buyers paid</span></div><div class="stat"><b>${sales.length ? money(net / sales.length) : "—"}</b><span>avg net per sale</span></div></div>
       <div class="scroll-x"><table class="money"><tbody>
         <tr><td>Buyers paid</td><td>${money(gross)}</td></tr><tr><td>Platform fees</td><td>−${money(fees)}</td></tr><tr><td>Labels and packaging</td><td>−${money(shipc)}</td></tr><tr><td>What you paid for the items</td><td>−${money(cogs)}</td></tr>
         <tr><td><b>Net from sales</b></td><td><b>${money(net)}</b></td></tr><tr><td>Expenses</td><td>−${money(spend)}</td></tr>
         <tr class="net"><td>Profit</td><td class="${profit >= 0 ? "pos" : "neg"}">${money(profit)}</td></tr></tbody></table></div>
-      ${mi ? `<p class="small muted">Mileage: ${mi.toFixed(1)} mi, worth a ${money(mileDed)} tax deduction. That's a deduction, not cash, so it isn't subtracted above.</p>` : ""}
+      ${mi ? `<p class="small muted">${mi.toFixed(1)} mi · ${money(mileDed)} deduction (not subtracted)</p>` : ""}
     </section>
-    <section class="card"><h2>Last 6 months</h2>${barChart(months)}<p class="small muted">Net from sales minus expenses, by month.</p></section>
-    <section class="card"><h2>By platform</h2>${brk(Object.entries(byPlat), platName)}</section>
-    <section class="card"><h2>By box</h2>${brk(Object.entries(byBox), k => BOXES[k] || k)}</section>
-    ${top.length ? `<section class="card"><h2>Best sales</h2><div class="list">${top.map(x => `<button class="row-item" data-act="open" data-id="${h(x.id)}">${thumb(x.it)}<div style="min-width:0"><div class="t">${h(x.it.name || x.id)}</div><div class="m"><span class="sku">${h(x.it.sku || x.id)}</span><span class="small muted">${h(platName(x.s.local ? "fblocal" : x.s.platform))}</span></div></div><div class="r"><b class="num pos">${money(x.s.net)}</b><div class="small muted">sold ${money(num(x.s.price))}</div></div></button>`).join("")}</div></section>` : ""}
-    <section class="card"><h2>Expenses and mileage</h2>
-      <div class="chips"><button class="chip" data-act="expType" data-v="expense" aria-pressed="${!mileage}">Expense</button><button class="chip" data-act="expType" data-v="mileage" aria-pressed="${mileage}">Mileage</button></div>
-      <div class="grid2"><label class="f">Date<input type="date" id="exDate" value="${today()}"></label>
-        ${mileage ? `<label class="f">Miles (round trip)<input type="number" inputmode="decimal" step="0.1" id="exMiles"></label>` : `<label class="f">Amount $<input type="number" inputmode="decimal" step="0.01" id="exAmt"></label>`}</div>
-      ${mileage ? "" : `<label class="f">Category<select id="exCat">${EXP_CATS.map(c => `<option>${h(c)}</option>`).join("")}</select></label>`}
-      <label class="f">${mileage ? "Trip purpose" : "Note"}<input type="text" id="exNote" placeholder="${mileage ? "Post office drop-off, 6 packages" : "Poly mailers, 100 pack"}"></label>
+    ${fold("m6", "Last 6 months", barChart(months))}
+    ${fold("byPlat", "By platform", brk(Object.entries(byPlat), platName))}
+    ${fold("byBox", "By box", brk(Object.entries(byBox), k => BOXES[k] || k))}
+    ${top.length ? fold("best", "Best sales", `<div class="list">${top.map(x => `<button class="row-item" data-act="open" data-id="${h(x.id)}">${thumb(x.it)}<div style="min-width:0"><div class="t">${h(x.it.name || x.id)}</div><div class="m"><span class="sku">${h(x.it.sku || x.id)}</span><span class="small muted">${h(platName(x.s.local ? "fblocal" : x.s.platform))}</span></div></div><div class="r"><b class="num pos">${money(x.s.net)}</b><div class="small muted">sold ${money(num(x.s.price))}</div></div></button>`).join("")}</div>`) : ""}
+    ${fold("exp", "Expenses & mileage", `
+      <div class="grid2"><label class="f">Type<select data-pick="expType"><option value="expense" ${mileage ? "" : "selected"}>Expense</option><option value="mileage" ${mileage ? "selected" : ""}>Mileage</option></select></label><label class="f">Date<input type="date" id="exDate" value="${today()}"></label></div>
+      <div class="grid2">${mileage ? `<label class="f">Miles (round trip)<input type="number" inputmode="decimal" step="0.1" id="exMiles"></label>` : `<label class="f">Amount $<input type="number" inputmode="decimal" step="0.01" id="exAmt"></label>`}</div>
+      ${mileage ? "" : `<label class="f">Category<select id="exCat">${EXP_CATS.map(c => `<option>${h(c)}</option>`).join("")}</select></label>`}</div>
+      <label class="f">${mileage ? "Purpose" : "Note"}<input type="text" id="exNote" placeholder="${mileage ? "Post office drop-off, 6 packages" : "Poly mailers, 100 pack"}"></label>
       <div class="btns"><button class="btn primary" data-act="addExp">${mileage ? "Add trip" : "Add expense"}</button></div>
-      ${exList.length ? `<div class="list">${exList.map(([id, e]) => { const isM = e.type === "mileage"; const v = isM ? (num(e.miles) || 0) * (num(e.rate) || 0) : num(e.amount); return `<div class="finding"><span class="sev ${isM ? "low" : ""}"></span><div style="min-width:0"><div class="small" style="font-weight:700">${h(isM ? (num(e.miles) || 0) + " mi · " + (e.note || "Trip") : (e.category || "Expense") + (e.note ? " · " + e.note : ""))}</div><div class="small muted">${h(e.date)}${isM ? " · deduction at " + Math.round((num(e.rate) || 0) * 1000) / 10 + "¢/mi" : ""}</div></div><div class="btns" style="flex-wrap:nowrap"><span class="num small">${money(v)}</span>${S.delExp === id ? `<button class="btn sm danger" data-act="delExpYes" data-id="${h(id)}">Delete</button>` : `<button class="btn sm ghost" data-act="delExp" data-id="${h(id)}" aria-label="Delete entry">✕</button>`}</div></div>`; }).join("")}</div>` : `<p class="small muted">Log supplies, postage and trips to the post office here. They come off your profit and count toward tax deductions.</p>`}
-      <hr><div class="btns"><span class="small muted">Spreadsheets for ${h(label.toLowerCase())}:</span><button class="btn sm" data-act="csvSales">Sales CSV</button><button class="btn sm" data-act="csvExp">Expenses CSV</button></div>
-      <p class="small muted">Not tax advice. Share these files with whoever does your taxes.</p>
-    </section>${donationsCardHTML()}`;
+      ${exList.length ? `<div class="list">${exList.map(([id, e]) => { const isM = e.type === "mileage"; const v = isM ? (num(e.miles) || 0) * (num(e.rate) || 0) : num(e.amount); return `<div class="finding"><span class="sev ${isM ? "low" : ""}"></span><div style="min-width:0"><div class="small" style="font-weight:700">${h(isM ? (num(e.miles) || 0) + " mi · " + (e.note || "Trip") : (e.category || "Expense") + (e.note ? " · " + e.note : ""))}</div><div class="small muted">${h(e.date)}${isM ? " · deduction at " + Math.round((num(e.rate) || 0) * 1000) / 10 + "¢/mi" : ""}</div></div><div class="btns" style="flex-wrap:nowrap"><span class="num small">${money(v)}</span>${S.delExp === id ? `<button class="btn sm danger" data-act="delExpYes" data-id="${h(id)}">Delete</button>` : `<button class="btn sm ghost" data-act="delExp" data-id="${h(id)}" aria-label="Delete entry">✕</button>`}</div></div>`; }).join("")}</div>` : ""}
+      <hr><div class="btns"><span class="small muted">Export</span><button class="btn sm" data-act="csvSales">Sales CSV</button><button class="btn sm" data-act="csvExp">Expenses CSV</button></div>`)}${donationsCardHTML()}`;
   },
   settings() {
     const s = S.settings; const f = (k, label, type = "text", step) => `<label class="f">${label}<input type="${type}" ${step ? `step="${step}" inputmode="decimal"` : ""} data-set="${k}" value="${h(s[k])}"></label>`;
     return `<h1>Settings</h1>
-    <section class="card"><h2>Shop</h2><div class="grid2">${f("ownerName", "Your first name")}${f("shopName", "Shop name (eBay & Depop)")}${f("fbName", "FB Marketplace name")}${f("zip", "Ship-from ZIP")}${f("city", "City shown on FB")}${f("handlingDays", "Handling days", "number", "1")}${f("staleDays", "Stale after (days)", "number", "1")}</div></section>
-    <section class="card"><h2>Look</h2>
-      <label class="f">Theme<select data-set="theme"><option value="auto" ${!["light", "dark"].includes(s.theme) ? "selected" : ""}>Match my device</option><option value="light" ${s.theme === "light" ? "selected" : ""}>Daylight lavender</option><option value="dark" ${s.theme === "dark" ? "selected" : ""}>Night sky</option></select></label></section>
-    <section class="card"><h2>Goals & sorting</h2><div class="grid2">${f("weeklyGoal", "Listings per week", "number", "1")}${f("sellMin", "Donate instead if take-home is under $", "number", "1")}${f("skuPrefix", "SKU prefix")}${f("skuNext", "Next SKU number", "number", "1")}</div>
-      <p class="small muted">New SKUs look like ${h(s.skuPrefix || "MB")}${String(new Date().getFullYear() % 100)}-${String(num(s.skuNext) || 1).padStart(4, "0")}.</p></section>
-    <section class="card"><h2>Photos</h2>
-      ${f("photoCleanupDays", "Delete photos this many days after a sale is complete (0 = never)", "number", "1")}
-      <p class="small muted">A small thumbnail is kept so the item still shows in your history. Edited photos already replace the stored originals; your untouched originals stay in your iPhone's Photos.</p></section>
-    <section class="card"><h2>Taxes</h2>
-      <div class="grid3">${f("mileRateH1", "Mileage rate $/mi", "number", "0.001")}${f("mileRateH2", "Rate from switch date", "number", "0.001")}${f("mileSwitch", "Switch date (YYYY-MM-DD)")}</div>
-      <p class="small muted">2026 IRS business rate: 72.5¢ through June 30, 76¢ from July 1. Each trip saves the rate for its date.</p></section>
-    <section class="card"><h2>Claude</h2>
-      <p class="small muted">AI buttons give you a prompt to copy. Paste it into the Claude app (attach the item's photos when it asks), then paste Claude's reply back here. It's free and uses your own Claude plan.</p></section>
-    <section class="card"><h2>Fees</h2><p class="small muted">Check these against each platform's current fee page now and then. They change.</p>
+    ${fold("sShop", "Shop", `<div class="grid2">${f("ownerName", "First name")}${f("shopName", "Shop name")}${f("fbName", "FB name")}${f("zip", "Ship-from ZIP")}${f("city", "FB city")}${f("handlingDays", "Handling days", "number", "1")}${f("staleDays", "Stale after (days)", "number", "1")}</div>`)}
+    ${fold("sLook", "Look", `
+      <label class="f">Theme<select data-set="theme"><option value="auto" ${!["light", "dark"].includes(s.theme) ? "selected" : ""}>Match my device</option><option value="light" ${s.theme === "light" ? "selected" : ""}>Daylight lavender</option><option value="dark" ${s.theme === "dark" ? "selected" : ""}>Night sky</option></select></label>`)}
+    ${fold("sGoals", "Goals & SKUs", `<div class="grid2">${f("weeklyGoal", "Listings per week", "number", "1")}${f("sellMin", "Donate if under $", "number", "1")}${f("skuPrefix", "SKU prefix")}${f("skuNext", "Next SKU #", "number", "1")}</div>
+      <p class="small muted" style="margin:0">Next: ${h(s.skuPrefix || "MB")}${String(new Date().getFullYear() % 100)}-${String(num(s.skuNext) || 1).padStart(4, "0")}</p>`)}
+    ${fold("sPhotos", "Photos", `
+      ${f("photoCleanupDays", "Delete photos N days after sale (0 = never)", "number", "1")}`)}
+    ${fold("sTax", "Taxes", `
+      <div class="grid3">${f("mileRateH1", "Mileage $/mi", "number", "0.001")}${f("mileRateH2", "Rate after switch", "number", "0.001")}${f("mileSwitch", "Switch date")}</div>`)}
+    ${fold("sFees", "Fees", `
       <div class="eyebrow">eBay</div><div class="grid2">${f("ebayFvfPct", "Final value fee %", "number", "0.01")}${f("salesTaxPct", "Avg sales tax % (fee base)", "number", "0.1")}${f("buyTaxPct", "Tax added to what you paid %", "number", "0.1")}${f("ebayOrderFeeHigh", "Per-order fee (> $10)", "number", "0.01")}${f("ebayOrderFeeLow", "Per-order fee (≤ $10)", "number", "0.01")}${f("ebayAdPct", "Promoted listings %", "number", "0.1")}</div>
       <div class="eyebrow">Depop</div><div class="grid2">${f("depopPct", "Payment processing %", "number", "0.01")}${f("depopFixed", "Processing fixed fee", "number", "0.01")}${f("depopBoostPct", "Boost fee % (0 if not boosting)", "number", "0.1")}</div>
-      <div class="eyebrow">FB Marketplace (shipped orders)</div><div class="grid2">${f("fbShipPct", "Selling fee %", "number", "0.1")}${f("fbShipMin", "Minimum fee", "number", "0.01")}</div></section>
-    <section class="card"><h2>Packaging cost per order</h2><div class="grid2">${f("pkgEnvelope", "Envelope / toploader", "number", "0.01")}${f("pkgPoly", "Poly mailer", "number", "0.01")}${f("pkgBubble", "Bubble mailer", "number", "0.01")}${f("pkgBox", "Box + padding", "number", "0.01")}</div></section>
-    <section class="card"><h2>Backup</h2><p class="small muted">Your data syncs automatically. A backup file is an extra copy of items and settings. Photos stay in the app.</p>
-      <div class="btns"><button class="btn" data-act="export">Save backup file</button><button class="btn" data-act="import">Restore from file</button></div></section>
+      <div class="eyebrow">FB Marketplace (shipped orders)</div><div class="grid2">${f("fbShipPct", "Selling fee %", "number", "0.1")}${f("fbShipMin", "Minimum fee", "number", "0.01")}</div>`)}
+    ${fold("sPkg", "Packaging costs", `<div class="grid2">${f("pkgEnvelope", "Envelope / toploader", "number", "0.01")}${f("pkgPoly", "Poly mailer", "number", "0.01")}${f("pkgBubble", "Bubble mailer", "number", "0.01")}${f("pkgBox", "Box + padding", "number", "0.01")}</div>`)}
+    ${fold("sBackup", "Backup", `
+      <div class="btns"><button class="btn" data-act="export">Save backup file</button><button class="btn" data-act="import">Restore from file</button></div>`)}
     ${DB ? `<section class="card"><h2>Account</h2><div class="btns"><button class="btn danger" data-act="signout">Sign out on this device</button></div></section>` : ""}`;
   }
 };
@@ -544,10 +529,10 @@ const TOOLS = {
     return `<section class="card"><h2>What you actually keep</h2>
       <div class="grid3"><label class="f">Sale price<input type="number" inputmode="decimal" step="0.01" data-fee="price" value="${h(v.price)}"></label><label class="f">Buyer pays shipping<input type="number" inputmode="decimal" step="0.01" data-fee="ship" value="${h(v.ship)}"></label><label class="f">Your label cost<input type="number" inputmode="decimal" step="0.01" data-fee="label" value="${h(v.label)}"></label><label class="f">Packaging<input type="number" inputmode="decimal" step="0.01" data-fee="pkg" value="${h(v.pkg)}"></label><label class="f">Your cost for item<input type="number" inputmode="decimal" step="0.01" data-fee="cost" value="${h(v.cost)}"></label></div>
       <div class="scroll-x" id="feeTable">${feeTable(rows)}</div>
-      <p class="small muted">eBay's fee is charged on item + shipping + sales tax, so it's estimated with your average tax rate. Change rates in Settings.</p></section>`;
+</section>`;
   },
   offer() {
-    return `<section class="card"><h2>Offer helper</h2><p class="small muted">Check an offer before you answer it: what you'd keep, and a reply ready to copy.</p>${offerBox(null, "t")}</section>`;
+    return `<section class="card"><h2>Offer helper</h2>${offerBox(null, "t")}</section>`;
   },
   messages() {
     const items = Object.entries(S.items).sort((a, b) => (b[1].updatedAt || 0) - (a[1].updatedAt || 0));
@@ -581,12 +566,11 @@ const TOOLS = {
         <div class="btns"><button class="btn" data-act="bundleAI">Get Claude's bundle advice</button></div><div id="bundleOut" class="ai-out"></div>`;
     }
     return `<section class="card"><h2>Bundle discount check</h2>
-      <p class="small muted">Pick 2 or more unsold items a buyer wants together. Uses each item's price for the platform and weight.</p>
       <div class="grid2"><label class="f">Platform<select data-bundle="plat">${Object.entries(PLAT).map(([k, n]) => `<option value="${k}" ${B.plat === k ? "selected" : ""}>${n}</option>`).join("")}</select></label><label class="f">Bundle discount %<input type="number" inputmode="decimal" data-bundle="pct" value="${h(B.pct)}"></label></div>
       ${out}
       <div class="list">${cand.length ? cand.map(([id, it]) => `<label class="check" style="padding:6px 0;border-top:1px solid var(--line)"><input type="checkbox" data-bsel="${h(id)}" ${B.sel[id] ? "checked" : ""}><span style="min-width:0;flex:1">${h(it.name || id)} <span class="sku">${h(it.sku || id)}</span></span><span class="mono small">${money(num((it.prices || {})[B.plat]))}</span></label>`).join("") : `<p class="muted small">No unsold items yet.</p>`}</div>
     </section>
-    <section class="card flat"><h2>How bundles work on each app</h2><details class="tips" open><summary>eBay</summary><ul><li>Set up combined shipping discounts in your shipping preferences so multi-item buyers pay for one shipment.</li><li>Volume pricing (buy 2, save X%) is under Seller Hub, Marketing. It works best on related items, like accessories for the same console.</li><li>Accept bundle offers through Best Offer or a custom invoice. Never take payment off eBay.</li></ul></details>
+    <section class="card flat"><h2>Tips</h2><details class="tips" open><summary>eBay</summary><ul><li>Set up combined shipping discounts in your shipping preferences so multi-item buyers pay for one shipment.</li><li>Volume pricing (buy 2, save X%) is under Seller Hub, Marketing. It works best on related items, like accessories for the same console.</li><li>Accept bundle offers through Best Offer or a custom invoice. Never take payment off eBay.</li></ul></details>
       <details class="tips"><summary>Depop</summary><ul><li>Turn on bundle discounts in your shop settings. Buyers bundle items from your shop, and the discount applies automatically.</li><li>A tiered discount (say 10% for 2, 15% for 3+) gets buyers browsing your whole shop. Depop rewards that engagement.</li></ul></details>
       <details class="tips"><summary>FB Marketplace</summary><ul><li>No bundle tool, so put "bundle deals available, message me" in descriptions and quote bundle prices in Messenger.</li><li>For local pickup a bundle costs you nothing extra, so you can discount a little deeper.</li></ul></details></section>`;
   },
@@ -598,8 +582,8 @@ const TOOLS = {
       <div class="btns"><label class="check"><input type="checkbox" data-ship="flat" ${v.flat ? "checked" : ""}> Flat card / coin / stamp</label><label class="check"><input type="checkbox" data-ship="media" ${v.media ? "checked" : ""}> Book / CD / DVD</label></div>
       <div class="stats"><div class="stat"><b>${money(sp.cost)}</b><span>${h(sp.service)}</span></div><div class="stat"><b>${sp.packedOz ?? "—"} oz</b><span>packed weight</span></div><div class="stat"><b>${h(PKG_NAME[sp.pkg])}</b><span>packaging</span></div></div>
       ${sp.notes.length ? `<ul class="small">${sp.notes.map(n => `<li>${h(n)}</li>`).join("")}</ul>` : ""}
-      <p class="small muted">These are estimates for a mid-distance zone. The real price shows when you buy the label.</p></section>
-    <section class="card flat"><h2>Ship free or cheap from ${h(S.settings.zip)}</h2>
+</section>
+    <section class="card flat"><h2>Tips</h2>
       <details class="tips" open><summary>Pay less for labels</summary><ul>
         <li>Always buy labels inside eBay, Depop or FB. They get commercial rates, which beat the post office counter.</li>
         <li>Up to 15.99 oz, Ground Advantage is priced by the ounce. Weigh after packing and trim excess packaging when you're near a break (4, 8, 12, 15.99 oz).</li>
@@ -619,7 +603,7 @@ const TOOLS = {
         <li>FB: offer local pickup first (no fees), then shipping as a backup.</li></ul></details></section>`;
   },
   boost() {
-    return `<section class="card"><h2>Boost plan</h2><p class="small muted">Claude looks at your current inventory and writes a week-by-week plan to raise views, watchers and sales across all three apps.</p>
+    return `<section class="card"><h2>Boost plan</h2>
       <button class="btn primary" data-act="boostAI" ${Object.keys(S.items).length ? "" : "disabled"}>Make my boost plan</button><div id="boostOut" class="ai-out"></div></section>
     <section class="card flat"><h2>Playbook</h2>
       <details class="tips" open><summary>eBay</summary><ul><li>List a little every day. New listings get a visibility bump, and steady activity helps your whole store.</li><li>Fill in every item specific. Search filters depend on them.</li><li>Use 8–12+ photos (up to 24 are free) on a plain background, starting with a sharp square cover photo.</li><li>Turn on Best Offer and send offers to watchers after 2–3 days.</li><li>Ship in 1 business day and offer 30-day returns for the best placement and buyer trust.</li><li>For competitive items, try Promoted Listings General at a low 2–4% rate. Set that rate in Settings so the net math stays honest.</li><li>After 60–90 days with no sale, end it and Sell Similar with fresh photos and a sharper title.</li></ul></details>
@@ -628,10 +612,10 @@ const TOOLS = {
       <details class="tips"><summary>Photos that convert (and never look AI-edited)</summary><ul><li>Shoot near a window in daylight, or under two matching lamps. Don't mix light colors.</li><li>Use the 1x main lens on your 15 Pro and tap to focus on labels and flaws.</li><li>Only global fixes: brightness, white balance, contrast, straightening, cropping. Never remove flaws or change the item. Platforms require photos to show the real item.</li><li>Include a scale shot and every flaw. Honest photos mean fewer returns and better reviews.</li></ul></details></section>`;
   },
   ask() {
-    return `<section class="card"><h2>Ask Claude</h2><p class="small muted">Claude sees your seller profile and a summary of your inventory.</p>
+    return `<section class="card"><h2>Ask Claude</h2>
       <div class="chips">${["Which items should I drop the price on?", "What should I list next and where?", "How do I ship a ceramic mug safely and cheaply?", "Write a shop bio for MackroBytes"].map(q => `<button class="chip" data-act="askq" data-v="${h(q)}">${h(q)}</button>`).join("")}</div>
       <div class="chat" id="chat">${S.chat.map(m => `<div class="bubble ${m.role === "user" ? "me" : "ai ai-out"}">${m.role === "user" ? h(m.content) : md(m.content)}</div>`).join("")}</div>
-      <textarea id="askIn" placeholder="Ask anything about selling, pricing or shipping" style="min-height:64px"></textarea>
+      <textarea id="askIn" placeholder="Ask anything" style="min-height:64px"></textarea>
       <div class="btns"><button class="btn primary" data-act="ask">Send</button>${S.chat.length ? `<button class="btn ghost" data-act="chatClear">Clear chat</button>` : ""}</div></section>`;
   }
 };
@@ -794,18 +778,18 @@ function renderDetail() {
   const L = it.listing || {}; const A = it.ai || {}; const pl = it.plat || {};
   const photos = it.photos || [];
   sheet.className = "sheet";
-  sheet.innerHTML = `<div class="sheet-top"><div class="wrap"><button class="btn sm" data-act="close">‹ Back</button><span class="sku">${h(it.sku || id)}</span>${boxTag(it.box)}
+  sheet.innerHTML = `<div class="sheet-top"><div class="wrap"><button class="btn sm" data-act="close" title="Back (Esc)">‹ Back</button><span class="sku">${h(it.sku || id)}</span>${boxTag(it.box)}
     <select style="margin-left:auto;width:auto" data-f="stage" aria-label="Stage">${STAGES.map(([k, n]) => `<option value="${k}" ${(it.stage || "intake") === k ? "selected" : ""}>${n}</option>`).join("")}</select></div></div>
   <div class="sheet-body"><div class="wrap">
     <input type="text" data-f="name" id="f-name" value="${h(it.name || "")}" placeholder="Item name" aria-label="Item name" style="font:600 24px var(--f-display);background:transparent;border-color:transparent;padding-left:0">
 
     <section class="card"><div class="card-h"><h2>Photos</h2><span class="sp muted small">${photos.length} / 24</span></div>
-      ${photos.length ? `<div class="photos">${photos.map((p, i) => `<button class="ph" data-act="edit" data-i="${i}" aria-label="Edit photo ${i + 1}"><img src="${h(photoSrc(p))}" alt="" loading="lazy">${i === 0 ? '<span class="tag">Cover</span>' : p.orig ? '<span class="tag">Edited</span>' : ""}</button>`).join("")}</div>` : `<p class="small muted">Shoot the front, back, labels or model numbers, every flaw, and something for scale. Tap a photo to retouch it.</p>`}
-      <div class="btns"><button class="btn primary" data-act="cam">Take photo</button><button class="btn" data-act="lib">Choose from library</button>${it.driveUrl ? `<a class="btn sm" href="${h(it.driveUrl)}" target="_blank" rel="noopener">Google Drive folder ↗</a>` : ""}</div>
-      ${!ASSETS ? `<p class="small muted">${LOCAL ? "Preview mode: photos disappear when you reload." : "Sign in to upload photos."}</p>` : ""}
+      ${photos.length ? `<div class="photos">${photos.map((p, i) => `<button class="ph" data-act="edit" data-i="${i}" aria-label="Edit photo ${i + 1}"><img src="${h(photoSrc(p))}" alt="" loading="lazy">${i === 0 ? '<span class="tag">Cover</span>' : p.orig ? '<span class="tag">Edited</span>' : ""}</button>`).join("")}</div>` : `<p class="small muted" style="margin:0">Front, back, labels, flaws, scale.</p>`}
+      <div class="btns"><button class="btn primary" data-act="cam">Take photo</button><button class="btn" data-act="lib">Library</button>${it.driveUrl ? `<a class="btn sm" href="${h(it.driveUrl)}" target="_blank" rel="noopener">Google Drive folder ↗</a>` : ""}</div>
+      ${!ASSETS ? `<p class="small muted" style="margin:0">${LOCAL ? "Preview: photos aren't saved." : "Sign in to upload photos."}</p>` : ""}
     </section>
 
-    <section class="card"><h2>Details</h2>
+    ${fold("dDetails", "Details", `
       <div class="grid2"><label class="f">Box<select data-f="box">${Object.entries(BOXES).map(([k, n]) => `<option value="${k}" ${it.box === k ? "selected" : ""}>${n}</option>`).join("")}</select></label>
       <label class="f">Condition<select data-f="condition"><option value="">Choose…</option>${CONDITIONS.map(c => `<option ${it.condition === c ? "selected" : ""}>${h(c)}</option>`).join("")}</select></label>
       ${fld(it, "brand", "Brand")}${fld(it, "category", "Type / category", { ph: "e.g. video game console" })}
@@ -816,39 +800,33 @@ function renderDetail() {
       ${fld(it, "included", "What's included", { ph: "Charger, box, manual…" })}
       <div class="grid4">${fld(it.costPre == null && it.cost != null ? { ...it, costPre: it.cost } : it, "costPre", "You paid (before tax) $", { num: 1, ph: "+" + (num(S.settings.buyTaxPct) ?? 6) + "% tax auto" })}${fld(it, "weightOz", "Weight (oz)", { num: 1 })}${fld(it, "dims.l", "L (in)", { num: 1 })}${fld(it, "dims.w", "W (in)", { num: 1 })}</div>
       <div class="grid4">${fld(it, "dims.h", "H (in)", { num: 1 })}</div>
-      <div class="btns"><label class="check"><input type="checkbox" data-f="flat" ${it.flat ? "checked" : ""}> Flat card / coin</label><label class="check"><input type="checkbox" data-f="media" ${it.media ? "checked" : ""}> Book / CD / DVD</label></div>
-    </section>
+      <div class="btns"><label class="check"><input type="checkbox" data-f="flat" ${it.flat ? "checked" : ""}> Flat card / coin</label><label class="check"><input type="checkbox" data-f="media" ${it.media ? "checked" : ""}> Book / CD / DVD</label></div>`, { open: true })}
 
-    <section class="card"><h2>Research</h2>
-      <p class="small muted">Run a price check, or look up what similar items actually <b>sold</b> for and paste a few prices. Claude uses them for pricing.</p>
+    ${fold("dResearch", "Research", `
       <div class="btns"><button class="btn primary" data-act="pcItem">${it.priceCheck ? "Price check again" : "Price check"}</button></div>
       ${it.priceCheck ? pcResultHTML(it.priceCheck, "item") : ""}
       ${researchLinks(it)}
       ${fld(it, "comps", "Sold comps you found", { area: true, ph: "eBay sold: $42, $38, $45 (used, no box)\nDepop: $40 listed" })}
-      ${fld(it, "engagement", "Views / watchers / likes (optional)", { ph: "eBay 120 views, 4 watchers; Depop 9 likes" })}
-    </section>
+      ${fld(it, "engagement", "Views / watchers / likes", { ph: "eBay 120 views, 4 watchers; Depop 9 likes" })}`, { badge: it.priceCheck ? `<span class="pill on">Checked</span>` : "" })}
 
-    <section class="card" id="aiCard"><div class="card-h"><h2>Write my listing</h2>${A.generatedAt ? `<span class="sp muted small">Last run ${new Date(A.generatedAt).toLocaleDateString()}</span>` : ""}</div>
-      <p class="small muted">Claude writes titles, descriptions and prices for all three apps, picks the best platforms, and plans shipping.${photos.length ? " Attach this item's photos in Claude and it reads them too." : ""}</p>
+    ${fold("dWrite", "Write my listing", `
       <div class="btns"><button class="btn primary" data-act="gen">${A.generatedAt ? "Rewrite listing" : "Write my listing"}</button></div>
       <div id="genStatus"></div>
       ${A.identified ? `<p class="small"><b>Claude sees:</b> ${h(A.identified)}</p>` : ""}
       ${A.platformFit ? `<div class="eyebrow">Where to list</div><div class="fit">${Object.keys(PLAT).map(p => { const x = A.platformFit[p] || {}; return `<div class="fitc ${h(x.fit)}"><div class="card-h"><b>${PLAT[p]}</b><span class="sp pill ${x.fit === "best" ? "on" : ""}">${h(x.fit || "?")}</span></div><span class="small">${h(x.why || "")}</span></div>`; }).join("")}</div>` : ""}
       ${A.verify && A.verify.length ? `<div class="banner"><b>Check before posting:</b> ${A.verify.map(h).join(" · ")}</div>` : ""}
       ${A.pricing ? `<p class="small"><b>Pricing (${h(A.pricing.confidence || "?")} confidence):</b> ${h(A.pricing.rationale || "")}${A.pricing.quickSale ? ` Quick-sale price: <span class="mono">${money(num(A.pricing.quickSale))}</span>.` : ""}</p>` : ""}
-      ${A.photoTips && A.photoTips.length ? `<details class="tips"><summary>Photo tips for this item</summary><ul>${A.photoTips.map(t => `<li>${h(t)}</li>`).join("")}</ul></details>` : ""}
-    </section>
+      ${A.photoTips && A.photoTips.length ? `<details class="tips"><summary>Photo tips for this item</summary><ul>${A.photoTips.map(t => `<li>${h(t)}</li>`).join("")}</ul></details>` : ""}`, { open: true, badge: A.generatedAt ? `<span class="muted small">${new Date(A.generatedAt).toLocaleDateString()}</span>` : "" })}
 
-    <section class="card"><h2>Prices</h2>
+    ${fold("dPrices", "Prices", `
       <div class="pricegrid">${[["prices.ebay", "eBay"], ["prices.depop", "Depop"], ["prices.fb", "FB"], ["floor", "Floor"]].map(([p, n]) => `<div class="pricebox"><div class="card-h"><label class="eyebrow" for="${fid(p)}">${n}</label><button class="btn sm ghost sp" data-act="copy" data-from="${fid(p)}" style="min-height:24px;padding:2px 6px">Copy</button></div><input type="number" inputmode="decimal" step="0.01" id="${fid(p)}" data-f="${p}" data-num="1" value="${h(getPath(it, p) ?? "")}"></div>`).join("")}</div>
       ${L.offerAccept || L.offerDecline ? `<p class="small muted">eBay Best Offer: auto-accept at <span class="mono">${money(num(L.offerAccept))}</span>, auto-decline below <span class="mono">${money(num(L.offerDecline))}</span>.</p>` : ""}
       <div class="eyebrow">What you actually keep</div><div id="moneySec">${moneySection(it)}</div>
-      <div class="grid3">${fld(it, "shipCharge", "Buyer pays shipping $", { num: 1, ph: "= label" })}${fld(it, "labelCost", "Actual label $", { num: 1, ph: "estimate" })}<label class="check" style="align-self:end;padding-bottom:10px"><input type="checkbox" data-f="freeShip" ${it.freeShip ? "checked" : ""}> Free shipping</label></div>
-    </section>
+      <div class="grid3">${fld(it, "shipCharge", "Buyer pays shipping $", { num: 1, ph: "= label" })}${fld(it, "labelCost", "Actual label $", { num: 1, ph: "estimate" })}<label class="check" style="align-self:end;padding-bottom:10px"><input type="checkbox" data-f="freeShip" ${it.freeShip ? "checked" : ""}> Free shipping</label></div>`, { open: true })}
 
-    ${STAGE_IDX[it.stage || "intake"] <= 3 ? `<section class="card"><h2>Offer helper</h2>${offerBox(id, "d")}</section>` : ""}
+    ${STAGE_IDX[it.stage || "intake"] <= 3 ? fold("dOffer", "Offer helper", offerBox(id, "d")) : ""}
 
-    <section class="card"><h2>Listing copy</h2>
+    ${fold("dCopy", "Listing copy", `
       <div class="plat-h"><b>eBay</b></div>
       ${copyField(it, "listing.ebayTitle", "Title", { max: 80 })}
       ${copyField(it, "listing.ebayDesc", "Description", { area: true, tall: 1 })}
@@ -858,16 +836,14 @@ function renderDetail() {
       ${copyField(it, "listing.depopKeywords", "Keywords")}
       <hr><div class="plat-h"><b>FB Marketplace</b></div>
       ${copyField(it, "listing.fbTitle", "Title", { max: 100 })}
-      ${copyField(it, "listing.fbDesc", "Description", { area: true })}
-    </section>
+      ${copyField(it, "listing.fbDesc", "Description", { area: true })}`)}
 
-    <section class="card"><h2>Shipping</h2><div id="shipSec">${shipSection(it)}</div>
-      <label class="f">Packaging<select data-f="pkg"><option value="">Automatic</option>${Object.entries(PKG_NAME).map(([k, n]) => `<option value="${k}" ${it.pkg === k ? "selected" : ""}>${n}</option>`).join("")}</select></label></section>
+    ${fold("dShip", "Shipping", `<div id="shipSec">${shipSection(it)}</div>
+      <label class="f">Packaging<select data-f="pkg"><option value="">Automatic</option>${Object.entries(PKG_NAME).map(([k, n]) => `<option value="${k}" ${it.pkg === k ? "selected" : ""}>${n}</option>`).join("")}</select></label>`)}
 
-    <section class="card"><h2>Where it's listed</h2>
+    ${fold("dWhere", "Where it's listed", `
       ${Object.keys(PLAT).map(p => { const x = pl[p] || {}; return `<div class="grid2" style="align-items:end"><label class="f">${PLAT[p]}<select data-f="plat.${p}.status"><option value="none" ${!x.status || x.status === "none" ? "selected" : ""}>Not listed</option><option value="planned" ${x.status === "planned" ? "selected" : ""}>Planned</option><option value="listed" ${x.status === "listed" ? "selected" : ""}>Listed${x.listedAt ? " · " + daysSince(x.listedAt) + "d" : ""}</option><option value="ended" ${x.status === "ended" ? "selected" : ""}>Ended</option></select></label>
-        <div class="btns" style="flex-wrap:nowrap"><input type="url" data-f="plat.${p}.url" id="${fid("plat." + p + ".url")}" placeholder="Listing link" value="${h(x.url || "")}">${x.url ? `<a class="btn sm" href="${h(x.url)}" target="_blank" rel="noopener">Open</a>` : ""}</div></div>`; }).join("")}
-    </section>
+        <div class="btns" style="flex-wrap:nowrap"><input type="url" data-f="plat.${p}.url" id="${fid("plat." + p + ".url")}" placeholder="Listing link" value="${h(x.url || "")}">${x.url ? `<a class="btn sm" href="${h(x.url)}" target="_blank" rel="noopener">Open</a>` : ""}</div></div>`; }).join("")}`, { badge: (n => n ? `<span class="pill on">${n} live</span>` : "")(Object.keys(PLAT).filter(p => (pl[p] || {}).status === "listed").length) })}
 
     <section class="card"><h2>Sale</h2>
       ${it.sale && it.stage === "sold" ? `<div class="pick"><span>Grab</span><span class="big">${h(it.sku || id)}</span><span>from the</span>${boxTag(it.box)}<span>box</span></div>` : ""}

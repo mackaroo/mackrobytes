@@ -49,10 +49,10 @@ function listedThisWeek() {
 }
 function goalCardHTML() {
   const goal = Math.max(1, num(S.settings.weeklyGoal) || 3), n = listedThisWeek(), pct = Math.min(1, n / goal);
-  const C = 2 * Math.PI * 32, toList = Object.values(S.items).filter(it => ["intake", "photographed", "drafted"].includes(it.stage || "intake")).length;
+  const C = 2 * Math.PI * 32;
   const left = Math.max(0, goal - n), days = 7 - ((new Date().getDay() + 6) % 7);
   return `<section class="card goal"><div style="min-width:0"><div class="eyebrow">This week</div><h2>${n >= goal ? "Goal met. Nice work!" : left + " more to list"}</h2>
-    <p class="small" style="margin:4px 0 10px;opacity:.9">${n} of ${goal} listed · ${days} day${days > 1 ? "s" : ""} left · ${toList} waiting to list</p>
+    <p class="small" style="margin:4px 0 10px;opacity:.9">${n}/${goal} · ${days}d left</p>
     <button class="btn sm" data-act="stagejump" data-v="drafted">What's ready?</button></div>
     <svg class="ring" viewBox="0 0 80 80" role="img" aria-label="${n} of ${goal} listed this week"><circle class="bgc" cx="40" cy="40" r="32"/><circle class="fg" cx="40" cy="40" r="32" stroke-dasharray="${C.toFixed(1)}" stroke-dashoffset="${(C * (1 - pct)).toFixed(1)}" transform="rotate(-90 40 40)"/><text x="40" y="47" text-anchor="middle">${Math.round(pct * 100)}%</text></svg></section>`;
 }
@@ -90,9 +90,7 @@ async function runLookup(ids) {
 function lookupCardHTML() {
   const ids = Object.entries(S.items).filter(([, it]) => needsLookup(it)).map(([id]) => id);
   if (!ids.length) return "";
-  return `<section class="card"><div class="card-h"><h2>Look items up</h2><span class="sp pill on">${ids.length} waiting</span></div>
-    <p class="small muted">Claude searches the web for the official title, brand, model, material, color, size and weight, and fills in whatever's blank.</p>
-    <div class="btns"><button class="btn primary" data-act="lookupAll">Look up ${Math.min(ids.length, 15)} item${ids.length > 1 ? "s" : ""}</button></div></section>`;
+  return fold("lookup", "Look items up", `<div class="btns"><button class="btn primary" data-act="lookupAll">Look up ${Math.min(ids.length, 15)} item${ids.length > 1 ? "s" : ""}</button></div>`, { cls: "slim", badge: `<span class="pill on">${ids.length}</span>` });
 }
 function lookupInfoHTML(it) {
   const st = it.lookup === "done" ? `Found${it.lookupSrc ? ` · <a href="${h(it.lookupSrc)}" target="_blank" rel="noopener">source</a>` : ""}` : it.lookup === "notfound" ? "Not found" : "Not looked up yet";
@@ -143,6 +141,42 @@ const SIZES = { small: ["Small", "fits in a shoebox", 10], medium: ["Medium", "f
 const SORT = { f: "all", q: "", hist: [], skipped: new Set(), cur: null, pending: null };
 const lsGet = (k, d) => { try { return localStorage.getItem(k) ?? d; } catch { return d; } };
 const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch {} };
+
+/* ---------- dropdown sections: a card that opens and closes, remembered per device ---------- */
+function fold(key, title, body, { open = false, badge = "", cls = "" } = {}) {
+  const o = lsGet("mb-fold-" + key, open ? "1" : "0") === "1";
+  return `<details class="card fold ${cls}" data-fold="${key}" ${o ? "open" : ""}><summary><h2>${title}</h2>${badge ? `<span class="sp">${badge}</span>` : ""}</summary><div class="fold-body">${body}</div></details>`;
+}
+// toggle doesn't bubble, so listen in the capture phase.
+document.addEventListener("toggle", e => { const d = e.target; if (d.dataset && d.dataset.fold) lsSet("mb-fold-" + d.dataset.fold, d.open ? "1" : "0"); }, true);
+
+// Dropdowns that replaced rows of chips.
+document.addEventListener("change", async e => {
+  const t = e.target, k = t.dataset && t.dataset.pick; if (!k) return;
+  if (k === "tool") { S.tools = t.value; render(); }
+  if (k === "period") { S.period = t.value; render(); }
+  if (k === "expType") { S.exp.type = t.value; render(); }
+  if (k === "wsSize" && SORT.pending) { SORT.pending.size = t.value; renderSorter(); }
+  if (k === "decision") {
+    if (t.value === "undecided") { await saveThing(t.dataset.id, { decision: "undecided", done: false }); $("#modal").hidden = true; }
+    else { $("#modal").hidden = true; $("#modal").innerHTML = ""; await decide(t.dataset.id, t.value); }
+  }
+});
+
+/* ---------- keyboard (Mac/PC): Esc closes, / searches, 1–5 switch tabs ---------- */
+document.addEventListener("keydown", e => {
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  const typing = /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName);
+  if (e.key === "Escape") {
+    const btn = ["#modal #mClose", "#modal [data-act=mclose]", "#editor [data-act=edClose]", "#sorter [data-act=fuBack]", "#sorter [data-act=sortClose]", "#sheet [data-act=close]"]
+      .map(s => $(s)).find(b => b && !b.closest("[hidden]"));
+    if (btn) { e.preventDefault(); if (typing) document.activeElement.blur(); btn.click(); }
+    return;
+  }
+  if (typing || !$("#sheet").hidden || !$("#modal").hidden || !$("#sorter").hidden || !$("#editor").hidden) return;
+  if (e.key === "/") { const q = $("#q") || $("#whereQ"); if (q) { e.preventDefault(); const d = q.closest("details"); if (d) d.open = true; q.focus(); } }
+  const n = "12345".indexOf(e.key); if (n >= 0) { e.preventDefault(); goTab(TAB_ORDER[n]); }
+});
 const thingName = t => (t.name || "").trim() || "Untitled";
 const thingThumb = t => t.photo ? `<img class="thumb" src="${h(photoSrc(t.photo))}" alt="" loading="lazy">` : `<div class="thumb">${t.shot ? "#" + t.shot : "no photo"}</div>`;
 async function saveThing(id, patch) { S.things[id] = { ...(S.things[id] || {}), ...patch, updatedAt: Date.now() }; renderSoon(); if (!$("#sorter").hidden) renderSorter(); await putDoc("things", id, S.things[id], true); }
@@ -169,23 +203,23 @@ function sortViewHTML() {
   const filt = SORT.f !== "all" ? thingsBy(SORT.f) : [];
   return `<h1>Sort</h1>
   <section class="card goal"><div style="min-width:0"><div class="eyebrow">Declutter</div><h2>${waiting ? waiting + " waiting to sort" : all.length ? "All sorted!" : "Start with a photo"}</h2>
-    <p class="small" style="margin:4px 0 10px;opacity:.9">${all.length ? `${decided} of ${all.length} decided · ${counts.donate + counts.trash} leaving the house` : "Snap one photo per thing, then swipe to decide."}</p>
-    <div class="btns">${waiting ? `<button class="btn sm" data-act="sortGo">Start sorting</button>` : ""}<button class="btn sm" data-act="thingCam">Snap photos</button><button class="btn sm" data-act="thingLib">From library</button></div></div>
+    <p class="small" style="margin:4px 0 10px;opacity:.9">${all.length ? `${decided}/${all.length} decided` : ""}</p>
+    <div class="btns">${waiting ? `<button class="btn sm" data-act="sortGo">Start sorting</button>` : ""}<button class="btn sm" data-act="thingCam">Snap photos</button><button class="btn sm" data-act="thingLib">Library</button></div></div>
     <svg class="ring" viewBox="0 0 80 80" aria-hidden="true"><circle class="bgc" cx="40" cy="40" r="32"/><circle class="fg" cx="40" cy="40" r="32" stroke-dasharray="201.1" stroke-dashoffset="${(201.1 * (1 - pct / 100)).toFixed(1)}" transform="rotate(-90 40 40)"/><text x="40" y="47" text-anchor="middle">${pct}%</text></svg></section>
   ${garageCardHTML()}
   <div class="tiles">${DEC_ORDER.map(d => `<button class="tile d-${d}" data-act="sortF" data-v="${d}" aria-pressed="${SORT.f === d}"><span class="blob"></span><b>${counts[d]}</b><span>${DEC[d].label}</span></button>`).join("")}</div>
   ${SORT.f !== "all" ? `<section class="card"><div class="card-h"><h2>${DEC[SORT.f].label}</h2><button class="btn sm sp" data-act="sortF" data-v="all">Close</button></div>${filt.length ? `<div class="list">${filt.map(([id, t]) => thingRow(id, t)).join("")}</div>` : `<p class="small muted">Nothing here yet.</p>`}</section>` : ""}
-  ${ask.length ? `<section class="card"><div class="card-h"><h2>Ask first</h2><span class="sp pill warn">${ask.length}</span></div><p class="small muted" style="margin:0">Not your call. Show these to whoever owns them, then tap their answer.</p>
+  ${ask.length ? fold("ask", "Ask first", `
     <div class="list">${ask.map(([id, t]) => `<div class="checkrow" style="grid-template-columns:44px minmax(0,1fr)">${thingThumb(t)}<div style="min-width:0"><div class="t" style="font-weight:700">${h(thingName(t))}</div><div class="small muted">Ask ${h(t.owner || "them")}${t.bin ? " · from " + h(t.bin) : ""}</div>
-      <div class="btns" style="margin-top:6px">${["keep", "sell", "donate", "trash"].map(d => `<button class="btn sm" data-act="decide" data-id="${h(id)}" data-v="${d}">${DEC[d].label}</button>`).join("")}</div></div></div>`).join("")}</div></section>` : ""}
-  <section class="card"><div class="card-h"><h2>Donate pile</h2><span class="sp muted small">${donPile.length} item${donPile.length === 1 ? "" : "s"}</span></div>
-    ${donPile.length ? `<div class="list">${donPile.map(([id, t]) => thingRow(id, t, true)).join("")}</div><button class="btn primary" data-act="donLog">Log a drop-off</button>` : `<p class="small muted">Things you mark Donate collect here until you drop them off.</p>`}</section>
-  <section class="card"><div class="card-h"><h2>Trash & recycling</h2><span class="sp muted small">${trash.length} left</span></div>
-    ${trash.length ? `<div class="list">${trash.map(([id, t]) => `<label class="checkrow"><input type="checkbox" data-trash="${h(id)}">${thingThumb(t)}<span class="t">${h(thingName(t))}</span><span></span></label>`).join("")}</div><p class="small muted" style="margin:0">Tick each one once it's out the door.</p>` : `<p class="small muted">Nothing waiting for the bin.</p>`}</section>
-  <section class="card"><h2>Where is it?</h2><input type="text" id="whereQ" value="${h(SORT.q)}" placeholder="Search kept things: name, room, tub" aria-label="Search kept things">
-    ${q ? (found.length ? `<div class="list">${found.map(([id, t]) => thingRow(id, t)).join("")}</div>` : `<p class="small muted">No kept things match.</p>`) : `<p class="small muted" style="margin:0">Everything you Keep or put in Storage remembers where it went.</p>`}</section>
-  <section class="card"><div class="card-h"><h2>Donations ${yr}</h2><span class="sp num">${money(dons.reduce((a, [, d]) => a + (num(d.value) || 0), 0))}</span></div>
-    ${dons.length ? `<div class="list">${dons.map(([, d]) => `<div class="finding" style="grid-template-columns:minmax(0,1fr) auto"><div><div style="font-weight:700">${h(d.place || "Donation")}</div><div class="small muted">${h(d.date)} · ${(d.items || []).length} items</div></div><span class="num">${money(num(d.value) || 0)}</span></div>`).join("")}</div>` : `<p class="small muted">Each drop-off you log is saved for taxes and shows on the Money tab.</p>`}</section>`;
+      <div class="btns" style="margin-top:6px">${["keep", "sell", "donate", "trash"].map(d => `<button class="btn sm" data-act="decide" data-id="${h(id)}" data-v="${d}">${DEC[d].label}</button>`).join("")}</div></div></div>`).join("")}</div>`, { open: true, badge: `<span class="pill warn">${ask.length}</span>` }) : ""}
+  ${fold("donPile", "Donate pile", `
+    ${donPile.length ? `<div class="list">${donPile.map(([id, t]) => thingRow(id, t, true)).join("")}</div><button class="btn primary" data-act="donLog">Log a drop-off</button>` : `<p class="small muted" style="margin:0">Empty.</p>`}`, { badge: `<span class="muted small">${donPile.length}</span>` })}
+  ${fold("trash", "Trash & recycling", `
+    ${trash.length ? `<div class="list">${trash.map(([id, t]) => `<label class="checkrow"><input type="checkbox" data-trash="${h(id)}">${thingThumb(t)}<span class="t">${h(thingName(t))}</span><span></span></label>`).join("")}</div>` : `<p class="small muted" style="margin:0">Empty.</p>`}`, { badge: `<span class="muted small">${trash.length}</span>` })}
+  ${fold("where", "Where is it?", `<input type="search" id="whereQ" value="${h(SORT.q)}" placeholder="Search kept things" aria-label="Search kept things">
+    ${q ? (found.length ? `<div class="list">${found.map(([id, t]) => thingRow(id, t)).join("")}</div>` : `<p class="small muted" style="margin:0">No matches.</p>`) : ""}`, { open: !!q })}
+  ${fold("dons", "Donations " + yr, `
+    ${dons.length ? `<div class="list">${dons.map(([, d]) => `<div class="finding" style="grid-template-columns:minmax(0,1fr) auto"><div><div style="font-weight:700">${h(d.place || "Donation")}</div><div class="small muted">${h(d.date)} · ${(d.items || []).length} items</div></div><span class="num">${money(num(d.value) || 0)}</span></div>`).join("")}</div>` : `<p class="small muted" style="margin:0">None yet.</p>`}`, { badge: `<span class="num">${money(dons.reduce((a, [, d]) => a + (num(d.value) || 0), 0))}</span>` })}`;
 }
 function thingRow(id, t, withValue) {
   let where = t.decision === "keep" || t.decision === "storage" ? (t.location || "No spot set") : t.decision === "sell" && t.itemId ? "Listed as " + ((S.items[t.itemId] || {}).sku || "item") : t.bin ? "From " + t.bin : "";
@@ -213,14 +247,13 @@ function switchBin(b) {
 }
 function garageCardHTML() {
   const bin = lsGet("mb-bin", ""), n = shotNext();
-  return `<section class="card garage"><h2>Garage mode</h2>
+  return fold("garage", "Garage mode", `
     <div class="grid2" style="align-items:end"><label class="f">Bin or area<select id="sortBin">${optsHTML(knownBins(), bin, { none: "Pick a bin…", add: "New bin…" })}</select></label><button class="btn" data-act="nextBin">Next bin →</button></div>
-    <label class="f">Next camera photo #<div class="stepper"><button class="btn" data-act="shotDn" aria-label="One less">−</button><input type="number" id="shotNo" inputmode="numeric" value="${n}"><button class="btn" data-act="shotUp" aria-label="One more">+</button></div></label>
+    <label class="f">Next photo #<div class="stepper"><button class="btn" data-act="shotDn" aria-label="One less">−</button><input type="number" id="shotNo" inputmode="numeric" value="${n}"><button class="btn" data-act="shotUp" aria-label="One more">+</button></div></label>
     <input type="text" id="glName" placeholder="What is it? (optional)" aria-label="What is it" enterkeyhint="done" autocomplete="off">
     <div class="gbtns">${["keep", "sell", "donate", "trash"].map(d => `<button class="dbtn d-${d}" data-act="glLog" data-v="${d}">${DEC[d].label}</button>`).join("")}</div>
     <div class="gbtns three">${["storage", "ask"].map(d => `<button class="dbtn d-${d}" data-act="glLog" data-v="${d}">${DEC[d].label}</button>`).join("")}<button class="dbtn d-undecided" data-act="glLog" data-v="later">Decide later</button></div>
-    <label class="check small"><input type="checkbox" id="glSign" ${lsGet("mb-sign", "1") === "1" ? "checked" : ""}> I photograph a sign at the start of each new bin (skips a number)</label>
-    <p class="small muted" style="margin:0">Take the photo, then tap where it goes. Each tap saves photo #${n} and moves to the next number. Match it to the number on the camera's playback screen.</p></section>`;
+    <label class="check small"><input type="checkbox" id="glSign" ${lsGet("mb-sign", "1") === "1" ? "checked" : ""}> Sign photo starts each bin</label>`, { cls: "garage" });
 }
 async function garageLog(d) {
   const name = ($("#glName") || {}).value?.trim() || "", bin = lsGet("mb-bin", ""), shot = shotNext(), now = Date.now();
@@ -251,14 +284,14 @@ function renderSorter() {
   const el = $("#sorter"); if (el.hidden) return;
   if (SORT.pending) { el.innerHTML = followupHTML(); return; }
   const id = sorterCurrent(), left = undecided().length;
-  if (!id) { el.innerHTML = `<div class="sorter-top"><button class="btn sm" data-act="sortClose">‹ Done</button></div><div class="sorter-stage"><div class="empty"><h2>${left ? "Only skipped ones left" : "All sorted!"}</h2><p>${left ? "Go back through the ones you skipped?" : "Nice work. Check the Donate and Trash piles on the Sort tab."}</p><div class="btns">${left ? `<button class="btn primary" data-act="sortRestart">Show skipped</button>` : ""}<button class="btn" data-act="sortClose">Back to Sort</button></div></div></div>`; return; }
+  if (!id) { el.innerHTML = `<div class="sorter-top"><button class="btn sm" data-act="sortClose">‹ Done</button></div><div class="sorter-stage"><div class="empty"><h2>${left ? "Only skipped ones left" : "All sorted!"}</h2><div class="btns">${left ? `<button class="btn primary" data-act="sortRestart">Show skipped</button>` : ""}<button class="btn" data-act="sortClose">Back to Sort</button></div></div></div>`; return; }
   const t = S.things[id];
   el.innerHTML = `<div class="sorter-top"><button class="btn sm" data-act="sortClose">‹ Done</button><span class="small muted" style="font-weight:700">${left} left${t.bin ? " · " + h(t.bin) : ""}</span>
     <span style="margin-left:auto" class="btns"><button class="btn sm" data-act="sortUndo" ${SORT.hist.length ? "" : "disabled"}>Undo</button><button class="btn sm" data-act="sortSkip">Skip</button></span></div>
   <div class="sorter-stage"><div class="swipecard" id="swipecard" data-id="${h(id)}">
     ${t.photo ? `<img src="${h(photoSrc(t.photo))}" alt="">` : `<div class="noimg">${t.shot ? "Camera photo #" + t.shot : "No photo"}</div>`}
     <span class="stamp r d-keep">KEEP</span><span class="stamp l d-donate">DONATE</span><span class="stamp u d-sell" style="top:18px">SELL</span><span class="stamp dn d-trash" style="top:auto;bottom:90px">TRASH</span>
-    <div class="info"><input type="text" id="thingName" value="${h(t.name || "")}" placeholder="What is it? (optional)" aria-label="Name" enterkeyhint="done"></div></div></div>
+    <div class="info"><input type="text" id="thingName" value="${h(t.name || "")}" placeholder="Name (optional)" aria-label="Name" enterkeyhint="done"></div></div></div>
   <div class="swipe-hints"><span>← Donate</span><span>↑ Sell · ↓ Trash</span><span>Keep →</span></div>
   <div class="dbtns">${DEC_ORDER.map(d => `<button class="dbtn d-${d}" data-act="decide" data-id="${h(id)}" data-v="${d}">${DEC[d].label}${DEC[d].hint ? `<small>${DEC[d].hint}</small>` : ""}</button>`).join("")}</div>`;
   bindSwipe($("#swipecard"));
@@ -306,9 +339,9 @@ function followupHTML() {
   // sell: worth-selling check
   const w = SORT.pending;
   return head + `<div class="sorter-stage" style="overflow-y:auto"><section class="card" style="width:min(100%,460px)"><div class="card-h">${pic}<h2>Worth selling?</h2></div>
-    <label class="f">What would it sell for? $<input type="number" id="wsPrice" inputmode="decimal" step="1" value="${h(w.price ?? t.value ?? "")}" placeholder="Guess, or check eBay sold"></label>
-    <a class="btn sm" target="_blank" rel="noopener" href="https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(t.name || "")}&LH_Sold=1&LH_Complete=1">Check eBay sold prices ↗</a>
-    <div class="eyebrow">Size to ship</div><div class="chips" style="flex-wrap:wrap">${Object.entries(SIZES).map(([k, [n, d2]]) => `<button class="chip" data-act="wsSize" data-v="${k}" aria-pressed="${(w.size || "small") === k}">${n} <span class="muted small">${d2}</span></button>`).join("")}</div>
+    <label class="f">Sells for $<input type="number" id="wsPrice" inputmode="decimal" step="1" value="${h(w.price ?? t.value ?? "")}" placeholder="Your guess"></label>
+    <a class="btn sm" target="_blank" rel="noopener" href="https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(t.name || "")}&LH_Sold=1&LH_Complete=1">eBay sold ↗</a>
+    <label class="f">Size<select data-pick="wsSize">${Object.entries(SIZES).map(([k, [n, d2]]) => `<option value="${k}" ${(w.size || "small") === k ? "selected" : ""}>${n} · ${d2}</option>`).join("")}</select></label>
     <div id="wsOut">${worthHTML()}</div></section></div>`;
 }
 function worthCalc() {
@@ -320,10 +353,10 @@ function worthCalc() {
   return { price, oz, eb, fb, best, min, ok: best >= min };
 }
 function worthHTML() {
-  const r = worthCalc(); if (!r) return `<p class="small muted">Enter a price to see what you'd actually keep after fees and shipping.</p>`;
+  const r = worthCalc(); if (!r) return "";
   return `<div class="offer-res"><div class="verdict ${r.ok ? "good" : "bad"}">${r.ok ? "Worth listing" : "Probably donate"}</div>
-    <div class="small">eBay with free shipping: you keep <b>${money(r.eb.net)}</b> (fees ${money(r.eb.fees)}, label ~${money(r.eb.label)})<br>FB local pickup: you keep <b>${money(r.fb.net)}</b></div>
-    <div class="small muted">${r.ok ? "Above your " + money(r.min) + " cutoff." : "Under your " + money(r.min) + " cutoff, so the time to photograph, list and ship probably isn't worth it."}</div></div>
+    <div class="small">eBay keeps <b>${money(r.eb.net)}</b> · FB local <b>${money(r.fb.net)}</b></div>
+    <div class="small muted">Cutoff ${money(r.min)}</div></div>
     <div class="btns"><button class="btn ${r.ok ? "primary" : ""}" data-act="wsSell">Sell it</button><button class="btn ${r.ok ? "" : "primary"}" data-act="wsDonate">Donate instead</button></div>`;
 }
 async function sellThing() {
@@ -339,7 +372,7 @@ function donLogHTML() {
   const pile = thingsBy("donate").filter(([, t]) => !t.done);
   return `<div class="modal-card" role="dialog" aria-label="Log a drop-off"><div class="card-h"><h2>Log a drop-off</h2><button class="btn sm ghost sp" data-act="mclose">Cancel</button></div>
     <div class="grid2"><label class="f">Where<input type="text" id="donPlace" placeholder="e.g. Goodwill, White Lake" value="${h(lsGet("mb-donplace", ""))}"></label><label class="f">Date<input type="date" id="donDate" value="${today()}"></label></div>
-    <p class="small muted" style="margin:0">Untick anything you didn't drop off. Values are what each would sell for at a thrift store (fair market value), for your tax records.</p>
+    <p class="small muted" style="margin:0">Thrift-store value each</p>
     <div class="list">${pile.map(([id, t]) => `<label class="checkrow" style="grid-template-columns:26px 44px minmax(0,1fr) 88px"><input type="checkbox" data-don="${h(id)}" checked>${thingThumb(t)}<span class="t">${h(thingName(t))}</span><input type="number" inputmode="decimal" step="1" data-donval="${h(id)}" value="${h(t.value ?? "")}" placeholder="$"></label>`).join("")}</div>
     <button class="btn primary" data-act="donSave">Save drop-off</button></div>`;
 }
@@ -357,7 +390,7 @@ function donationsCardHTML() {
   if (!d.length) return "";
   const total = d.reduce((a, x) => a + (num(x.value) || 0), 0), n = d.reduce((a, x) => a + (x.items || []).length, 0);
   return `<section class="card"><div class="card-h"><h2>Donations ${yr}</h2><span class="sp num">${money(total)}</span></div>
-    <p class="small muted" style="margin:0">${n} items in ${d.length} drop-off${d.length > 1 ? "s" : ""}. Donated goods are only deductible if you itemize. Keep the receipts; over $500 in a year also needs Form 8283.</p>
+    <p class="small muted" style="margin:0">${n} items · ${d.length} drop-off${d.length > 1 ? "s" : ""}${total > 500 ? " · over $500 needs Form 8283" : ""}</p>
     <div class="btns"><button class="btn sm" data-act="csvDon">Export CSV</button></div></section>`;
 }
 
@@ -369,7 +402,7 @@ function thingSheetHTML(id) {
     <label class="f">Name<input type="text" data-tf="name" data-id="${h(id)}" value="${h(t.name || "")}"></label>
     <div class="grid2"><label class="f">Where it is now<select data-tf="location" data-id="${h(id)}">${optsHTML(recentLocations(), t.location, { none: "Not set", add: "New spot…" })}</select></label><label class="f">Came from<select data-tf="bin" data-id="${h(id)}">${optsHTML(knownBins(), t.bin, { none: "Not set", add: "New bin…" })}</select></label></div>
     <label class="f">Camera photo #<input type="number" inputmode="numeric" data-tf="shot" data-id="${h(id)}" value="${h(t.shot ?? "")}"></label>
-    <div class="eyebrow">Decision</div><div class="chips" style="flex-wrap:wrap">${DEC_ORDER.map(d => `<button class="chip" data-act="decide" data-id="${h(id)}" data-v="${d}" aria-pressed="${t.decision === d}">${DEC[d].label}</button>`).join("")}<button class="chip" data-act="thingReset" data-id="${h(id)}">Back to unsorted</button></div>
+    <label class="f">Decision<select data-pick="decision" data-id="${h(id)}"><option value="undecided" ${(t.decision || "undecided") === "undecided" ? "selected" : ""}>Not sorted</option>${DEC_ORDER.map(d => `<option value="${d}" ${t.decision === d ? "selected" : ""}>${DEC[d].label}</option>`).join("")}</select></label>
     ${t.itemId && S.items[t.itemId] ? `<button class="btn" data-act="open" data-id="${h(t.itemId)}">Open ${h(S.items[t.itemId].sku)} in Items</button>` : ""}
     <div id="thDel"><button class="btn sm danger" data-act="thingDel" data-id="${h(id)}">Delete</button></div></div>`;
 }
@@ -475,8 +508,8 @@ function pcResultHTML(r, ctx) {
     ${pick.x.why ? `<p class="small" style="margin:0">${h(pick.x.why)}</p>` : ""}
     <div class="scroll-x"><table class="money"><thead><tr><th></th><th>Fit</th><th>List at</th><th>You keep</th></tr></thead><tbody>
       ${rows.map(x => `<tr class="${x.x.fit === "skip" ? "muted" : ""}"><td>${x.p === "fb" ? "FB local" : h(PLAT[x.p])}</td><td><span class="pill ${x.x.fit === "best" ? "on" : ""}">${h(x.x.fit || "?")}</span></td><td>${money(x.price)}</td><td class="${x.net >= min ? "pos" : ""}">${money(x.net)}</td></tr>`).join("")}</tbody></table></div>
-    <p class="small muted" style="margin:0">After your fees and packaging. eBay and Depop assume the buyer pays a ~${money(label)} label${oz ? " (" + oz + " oz packed)" : ""}.${r.other ? " Also try: " + h(r.other) : ""}</p>
-    <div class="small ${ok ? "pos" : "neg"}" style="font-weight:700">${ok ? "Worth listing." : "Under your " + money(min) + " cutoff. Bundle it or donate it."}${num(r.quickSale) ? ` <span class="muted" style="font-weight:600">Quick-sale price: ${money(num(r.quickSale))}.</span>` : ""}</div>
+    ${r.other ? `<p class="small muted" style="margin:0">Also try: ${h(r.other)}</p>` : ""}
+    <div class="small ${ok ? "pos" : "neg"}" style="font-weight:700">${ok ? "Worth listing." : "Under " + money(min) + ". Bundle or donate."}${num(r.quickSale) ? ` <span class="muted" style="font-weight:600">Quick-sale price: ${money(num(r.quickSale))}.</span>` : ""}</div>
     ${r.tips && r.tips.length ? `<ul class="small" style="margin:0;padding-left:18px">${r.tips.slice(0, 4).map(t => `<li>${h(t)}</li>`).join("")}</ul>` : ""}
     ${r.verify && r.verify.length ? `<div class="banner"><b>Check:</b> ${r.verify.map(h).join(" · ")}</div>` : ""}
     <div class="btns">${ctx === "item" ? `<button class="btn primary" data-act="pcUse">Use these prices</button>` : `<button class="btn primary" data-act="pcAdd">Add as item</button>`}
@@ -485,10 +518,9 @@ function pcResultHTML(r, ctx) {
     <div class="small muted">Checked ${new Date(r.at || Date.now()).toLocaleDateString()}</div></div>`;
 }
 function priceCheckCardHTML() {
-  return `<section class="card"><div class="card-h"><h2>Price check</h2>${PC.res ? `<button class="btn sm ghost sp" data-act="pcClear">Clear</button>` : ""}</div>
-    <p class="small muted" style="margin:0">Type a name or model #. Claude looks up recent sold prices and tells you where it'll sell best.</p>
-    <form class="quick" data-pc><input type="text" name="q" value="${h(PC.q)}" placeholder="e.g. Nintendo DS Lite USG-001" aria-label="Item name or model number" enterkeyhint="search" autocomplete="off"><button class="btn primary" type="submit">Research</button></form>
-    ${PC.res ? pcResultHTML(PC.res, "home") : ""}</section>`;
+  return fold("pc", "Price check", `
+    <form class="quick" data-pc><input type="text" name="q" value="${h(PC.q)}" placeholder="Name or model #" aria-label="Item name or model number" enterkeyhint="search" autocomplete="off"><button class="btn primary" type="submit">Research</button></form>
+    ${PC.res ? pcResultHTML(PC.res, "home") + `<div class="btns"><button class="btn sm ghost" data-act="pcClear">Clear</button></div>` : ""}`, { open: !!PC.res });
 }
 // What a price check fills on an item. Only blank details get filled; prices are replaced.
 function pcItemPatch(r, it = {}) {

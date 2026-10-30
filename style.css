@@ -330,3 +330,53 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 2px 0; width: 100%; }
 .gbtns.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .gbtns.three .dbtn { min-height: 48px; font-size: 14px; }
 .filters { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+
+/* ---------- dropdown sections ---------- */
+details.card.fold { display: block; padding: 0; }
+.fold > summary { list-style: none; display: flex; align-items: center; gap: 10px; padding: 14px 16px; cursor: pointer; border-radius: var(--r); user-select: none; -webkit-user-select: none; }
+.fold > summary::-webkit-details-marker { display: none; }
+.fold > summary .sp { margin-left: auto; }
+.fold > summary::after { content: ""; flex: none; width: 8px; height: 8px; margin: 0 4px 3px 2px; border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); transform: rotate(45deg); transition: transform .18s; }
+.fold:not(:has(> summary .sp)) > summary::after { margin-left: auto; }
+.fold[open] > summary::after { transform: rotate(-135deg); margin-bottom: -3px; }
+.fold > summary:hover { background: var(--surface-2); }
+.fold-body { padding: 0 16px 16px; display: flex; flex-direction: column; gap: 12px; }
+.fold.slim > summary { padding-block: 10px; }
+.fold.slim > summary h2 { font-size: 16px; }
+@media (prefers-reduced-motion: reduce) { .fold > summary::after { transition: none; } }
+.pick-sel { width: auto; min-width: 140px; font-weight: 700; }
+
+/* ---------- mouse & trackpad ---------- */
+@media (hover: hover) and (pointer: fine) {
+  .row-item { border-radius: 12px; transition: background .12s; }
+  .row-item:hover { background: var(--surface-2); }
+  .tile { transition: transform .12s, box-shadow .12s; }
+  .tile:hover { transform: translateY(-2px); box-shadow: 0 12px 30px rgba(80, 70, 170, .2); }
+  .chip:hover:not([aria-pressed="true"]), .tab:hover:not([aria-current="page"]), .gear:hover { background: var(--surface-2); color: var(--ink); }
+  .pipe button:hover b { color: var(--accent-ink); }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 10px; border: 2px solid transparent; background-clip: padding-box; }
+}
+
+/* ---------- laptop & desktop: sidebar nav, wider content ---------- */
+@media (min-width: 1000px) {
+  body { font-size: 15px; }
+  .top, main { padding-left: 232px; }
+  .wrap { max-width: 980px; }
+  main { padding-bottom: 48px; }
+  .tabs { left: 16px; right: auto; top: 72px; bottom: auto; width: 200px; padding: 8px; border-radius: 22px; }
+  .tabs .row { display: flex; flex-direction: column; gap: 2px; }
+  .tab { flex-direction: row; justify-content: flex-start; gap: 12px; font-size: 14.5px; padding: 10px 14px; border-radius: 14px; }
+  .tab svg { width: 20px; height: 20px; }
+  .tab.add-tab { order: -1; margin-bottom: 6px; color: var(--ink); }
+  .tab.add-tab .fab { width: 28px; height: 28px; margin: 0; border-radius: 9px; box-shadow: none; }
+  .tab.add-tab svg { width: 18px; height: 18px; }
+  .tab.add-tab::after { content: "Add item"; }
+  .toast { bottom: 28px; }
+  .filters { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); } .tiles.four { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .sheet .wrap, .sorter-top { max-width: 980px; margin-inline: auto; width: 100%; }
+  .modal-card { max-height: 86vh; }
+  .grid2 { gap: 12px; }
+}
+@media (min-width: 1400px) { .wrap { max-width: 1080px; } }
