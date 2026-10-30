@@ -144,7 +144,7 @@ const SORT = { f: "all", q: "", hist: [], skipped: new Set(), cur: null, pending
 const lsGet = (k, d) => { try { return localStorage.getItem(k) ?? d; } catch { return d; } };
 const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch {} };
 const thingName = t => (t.name || "").trim() || "Untitled";
-const thingThumb = t => t.photo ? `<img class="thumb" src="${h(photoSrc(t.photo))}" alt="" loading="lazy">` : `<div class="thumb">no photo</div>`;
+const thingThumb = t => t.photo ? `<img class="thumb" src="${h(photoSrc(t.photo))}" alt="" loading="lazy">` : `<div class="thumb">${t.shot ? "#" + t.shot : "no photo"}</div>`;
 async function saveThing(id, patch) { S.things[id] = { ...(S.things[id] || {}), ...patch, updatedAt: Date.now() }; renderSoon(); if (!$("#sorter").hidden) renderSorter(); await putDoc("things", id, S.things[id], true); }
 async function addThingPhotos(files) {
   if (!files.length) return; toast("Saving " + files.length + " photo(s)…"); let n = 0;
@@ -165,15 +165,14 @@ function sortViewHTML() {
   const donPile = thingsBy("donate").filter(([, t]) => !t.done), trash = thingsBy("trash").filter(([, t]) => !t.done), ask = thingsBy("ask");
   const yr = new Date().getFullYear(); const dons = Object.entries(S.donations).filter(([, d]) => String(d.date || "").startsWith(String(yr))).sort((a, b) => (b[1].date || "").localeCompare(a[1].date || ""));
   const q = SORT.q.toLowerCase();
-  const found = q ? Object.entries(S.things).filter(([, t]) => ["keep", "storage"].includes(t.decision) && [t.name, t.location, t.bin].join(" ").toLowerCase().includes(q)) : [];
+  const found = q ? Object.entries(S.things).filter(([, t]) => ["keep", "storage"].includes(t.decision) && [t.name, t.location, t.bin, t.shot ? "#" + t.shot : ""].join(" ").toLowerCase().includes(q)) : [];
   const filt = SORT.f !== "all" ? thingsBy(SORT.f) : [];
   return `<h1>Sort</h1>
   <section class="card goal"><div style="min-width:0"><div class="eyebrow">Declutter</div><h2>${waiting ? waiting + " waiting to sort" : all.length ? "All sorted!" : "Start with a photo"}</h2>
     <p class="small" style="margin:4px 0 10px;opacity:.9">${all.length ? `${decided} of ${all.length} decided · ${counts.donate + counts.trash} leaving the house` : "Snap one photo per thing, then swipe to decide."}</p>
     <div class="btns">${waiting ? `<button class="btn sm" data-act="sortGo">Start sorting</button>` : ""}<button class="btn sm" data-act="thingCam">Snap photos</button><button class="btn sm" data-act="thingLib">From library</button></div></div>
     <svg class="ring" viewBox="0 0 80 80" aria-hidden="true"><circle class="bgc" cx="40" cy="40" r="32"/><circle class="fg" cx="40" cy="40" r="32" stroke-dasharray="201.1" stroke-dashoffset="${(201.1 * (1 - pct / 100)).toFixed(1)}" transform="rotate(-90 40 40)"/><text x="40" y="47" text-anchor="middle">${pct}%</text></svg></section>
-  <section class="card"><div class="grid2" style="align-items:end"><label class="f">Bin or area you're sorting<input type="text" id="sortBin" value="${h(bin)}" placeholder="e.g. Tub 1, hall closet"></label><button class="btn" data-act="nextBin">Next bin →</button></div>
-    <p class="small muted" style="margin:0">New photos get tagged with this so you know where things came from.</p></section>
+  ${garageCardHTML()}
   <div class="tiles">${DEC_ORDER.map(d => `<button class="tile d-${d}" data-act="sortF" data-v="${d}" aria-pressed="${SORT.f === d}"><span class="blob"></span><b>${counts[d]}</b><span>${DEC[d].label}</span></button>`).join("")}</div>
   ${SORT.f !== "all" ? `<section class="card"><div class="card-h"><h2>${DEC[SORT.f].label}</h2><button class="btn sm sp" data-act="sortF" data-v="all">Close</button></div>${filt.length ? `<div class="list">${filt.map(([id, t]) => thingRow(id, t)).join("")}</div>` : `<p class="small muted">Nothing here yet.</p>`}</section>` : ""}
   ${ask.length ? `<section class="card"><div class="card-h"><h2>Ask first</h2><span class="sp pill warn">${ask.length}</span></div><p class="small muted" style="margin:0">Not your call. Show these to whoever owns them, then tap their answer.</p>
@@ -189,9 +188,57 @@ function sortViewHTML() {
     ${dons.length ? `<div class="list">${dons.map(([, d]) => `<div class="finding" style="grid-template-columns:minmax(0,1fr) auto"><div><div style="font-weight:700">${h(d.place || "Donation")}</div><div class="small muted">${h(d.date)} · ${(d.items || []).length} items</div></div><span class="num">${money(num(d.value) || 0)}</span></div>`).join("")}</div>` : `<p class="small muted">Each drop-off you log is saved for taxes and shows on the Money tab.</p>`}</section>`;
 }
 function thingRow(id, t, withValue) {
-  const where = t.decision === "keep" || t.decision === "storage" ? (t.location || "No spot set") : t.decision === "sell" && t.itemId ? "Listed as " + ((S.items[t.itemId] || {}).sku || "item") : t.bin ? "From " + t.bin : "";
+  let where = t.decision === "keep" || t.decision === "storage" ? (t.location || "No spot set") : t.decision === "sell" && t.itemId ? "Listed as " + ((S.items[t.itemId] || {}).sku || "item") : t.bin ? "From " + t.bin : "";
+  if (t.shot) where = (where ? where + " · " : "") + "Photo #" + t.shot;
   return `<button class="row-item" data-act="thingOpen" data-id="${h(id)}">${thingThumb(t)}<div style="min-width:0"><div class="t">${h(thingName(t))}</div><div class="m"><span class="dpill d-${t.decision || "undecided"}">${h((DEC[t.decision] || { label: "To sort" }).label)}</span><span class="small muted">${h(where)}</span></div></div><div class="r">${withValue && num(t.value) ? money(num(t.value)) : ""}</div></button>`;
 }
+
+/* garage mode: log each thing as it's photographed on a separate camera, numbered to match the camera's shot order */
+const shotNext = () => Math.max(1, parseInt(lsGet("mb-shot", "1")) || 1);
+const setShot = n => lsSet("mb-shot", String(Math.max(1, n)));
+function knownBins() {
+  const seen = new Map(), add = (b, at) => { b = String(b || "").trim(); if (b && !(seen.get(b) >= at)) seen.set(b, at || 0); };
+  Object.values(S.things).forEach(t => add(t.bin, t.createdAt)); Object.values(S.items).forEach(it => add(it.bin, it.createdAt));
+  return [...seen.entries()].sort((a, b) => b[1] - a[1]).map(x => x[0]);
+}
+// <option>s for a list of names; "add" puts a last option that asks for a new name.
+function optsHTML(list, val, { none, add } = {}) {
+  const all = val && !list.includes(val) ? [val, ...list] : list;
+  return (none != null ? `<option value="" ${val ? "" : "selected"}>${h(none)}</option>` : "") + all.map(x => `<option ${x === val ? "selected" : ""}>${h(x)}</option>`).join("") + (add ? `<option value="__new">${h(add)}</option>` : "");
+}
+function switchBin(b) {
+  lsSet("mb-bin", b); const sign = lsGet("mb-sign", "1") === "1";
+  if (sign) setShot(shotNext() + 1);
+  render(); toast("Now sorting " + b + (sign ? ". Photo #" + (shotNext() - 1) + " is its sign." : ""));
+}
+function garageCardHTML() {
+  const bin = lsGet("mb-bin", ""), n = shotNext();
+  return `<section class="card garage"><h2>Garage mode</h2>
+    <div class="grid2" style="align-items:end"><label class="f">Bin or area<select id="sortBin">${optsHTML(knownBins(), bin, { none: "Pick a bin…", add: "New bin…" })}</select></label><button class="btn" data-act="nextBin">Next bin →</button></div>
+    <label class="f">Next camera photo #<div class="stepper"><button class="btn" data-act="shotDn" aria-label="One less">−</button><input type="number" id="shotNo" inputmode="numeric" value="${n}"><button class="btn" data-act="shotUp" aria-label="One more">+</button></div></label>
+    <input type="text" id="glName" placeholder="What is it? (optional)" aria-label="What is it" enterkeyhint="done" autocomplete="off">
+    <div class="gbtns">${["keep", "sell", "donate", "trash"].map(d => `<button class="dbtn d-${d}" data-act="glLog" data-v="${d}">${DEC[d].label}</button>`).join("")}</div>
+    <div class="gbtns three">${["storage", "ask"].map(d => `<button class="dbtn d-${d}" data-act="glLog" data-v="${d}">${DEC[d].label}</button>`).join("")}<button class="dbtn d-undecided" data-act="glLog" data-v="later">Decide later</button></div>
+    <label class="check small"><input type="checkbox" id="glSign" ${lsGet("mb-sign", "1") === "1" ? "checked" : ""}> I photograph a sign at the start of each new bin (skips a number)</label>
+    <p class="small muted" style="margin:0">Take the photo, then tap where it goes. Each tap saves photo #${n} and moves to the next number. Match it to the number on the camera's playback screen.</p></section>`;
+}
+async function garageLog(d) {
+  const name = ($("#glName") || {}).value?.trim() || "", bin = lsGet("mb-bin", ""), shot = shotNext(), now = Date.now();
+  const id = "t" + now.toString(36) + Math.random().toString(36).slice(2, 6);
+  const t = { name, bin, shot, decision: d === "later" ? "undecided" : d, createdAt: now, ...(d === "later" ? {} : { decidedAt: now }) };
+  if (d === "sell") t.itemId = await newItem({ name: name || `Photo #${shot}${bin ? " from " + bin : ""}`, bin, shot, condNotes: bin ? "From " + bin : "", fromThing: id });
+  setShot(shot + 1); await saveThing(id, t);
+  toast(`#${shot} ${name || "logged"}: ${d === "later" ? "decide later" : DEC[d].label}`, { label: "Undo", fn: async () => {
+    delete S.things[id]; renderSoon(); await delDoc("things", id); if (t.itemId) await deleteItem(t.itemId); setShot(shot); render(); } });
+}
+// Choosing "New bin…" (or "New spot…") in any dropdown asks for the name, before other change handlers see it.
+document.addEventListener("change", e => {
+  const t = e.target; if (t.tagName !== "SELECT" || t.value !== "__new") return;
+  const n = (prompt(t.querySelector('option[value="__new"]').textContent.replace("…", "") + " name:") || "").trim();
+  if (!n) { e.stopImmediatePropagation(); t.value = ([...t.options].find(o => o.defaultSelected) || t.options[0]).value; return; }
+  if (t.id === "sortBin") { e.stopImmediatePropagation(); switchBin(n); return; }
+  const o = new Option(n, n, true, true); t.add(o, t.options.length - 1); t.value = n;
+}, true);
 
 /* sorter overlay */
 function openSorter(startId) { SORT.skipped.clear(); SORT.cur = startId || null; $("#sorter").hidden = false; document.body.style.overflow = "hidden"; renderSorter(); }
@@ -209,7 +256,7 @@ function renderSorter() {
   el.innerHTML = `<div class="sorter-top"><button class="btn sm" data-act="sortClose">‹ Done</button><span class="small muted" style="font-weight:700">${left} left${t.bin ? " · " + h(t.bin) : ""}</span>
     <span style="margin-left:auto" class="btns"><button class="btn sm" data-act="sortUndo" ${SORT.hist.length ? "" : "disabled"}>Undo</button><button class="btn sm" data-act="sortSkip">Skip</button></span></div>
   <div class="sorter-stage"><div class="swipecard" id="swipecard" data-id="${h(id)}">
-    ${t.photo ? `<img src="${h(photoSrc(t.photo))}" alt="">` : `<div class="noimg">No photo</div>`}
+    ${t.photo ? `<img src="${h(photoSrc(t.photo))}" alt="">` : `<div class="noimg">${t.shot ? "Camera photo #" + t.shot : "No photo"}</div>`}
     <span class="stamp r d-keep">KEEP</span><span class="stamp l d-donate">DONATE</span><span class="stamp u d-sell" style="top:18px">SELL</span><span class="stamp dn d-trash" style="top:auto;bottom:90px">TRASH</span>
     <div class="info"><input type="text" id="thingName" value="${h(t.name || "")}" placeholder="What is it? (optional)" aria-label="Name" enterkeyhint="done"></div></div></div>
   <div class="swipe-hints"><span>← Donate</span><span>↑ Sell · ↓ Trash</span><span>Keep →</span></div>
@@ -320,7 +367,8 @@ function thingSheetHTML(id) {
   return `<div class="modal-card" role="dialog" aria-label="Edit"><div class="card-h"><h2>${h(thingName(t))}</h2><button class="btn sm ghost sp" data-act="mclose">Close</button></div>
     ${t.photo ? `<img src="${h(photoSrc(t.photo))}" alt="" style="width:100%;max-height:300px;object-fit:cover;border-radius:18px">` : ""}
     <label class="f">Name<input type="text" data-tf="name" data-id="${h(id)}" value="${h(t.name || "")}"></label>
-    <div class="grid2"><label class="f">Where it is now<input type="text" data-tf="location" data-id="${h(id)}" value="${h(t.location || "")}"></label><label class="f">Came from<input type="text" data-tf="bin" data-id="${h(id)}" value="${h(t.bin || "")}"></label></div>
+    <div class="grid2"><label class="f">Where it is now<select data-tf="location" data-id="${h(id)}">${optsHTML(recentLocations(), t.location, { none: "Not set", add: "New spot…" })}</select></label><label class="f">Came from<select data-tf="bin" data-id="${h(id)}">${optsHTML(knownBins(), t.bin, { none: "Not set", add: "New bin…" })}</select></label></div>
+    <label class="f">Camera photo #<input type="number" inputmode="numeric" data-tf="shot" data-id="${h(id)}" value="${h(t.shot ?? "")}"></label>
     <div class="eyebrow">Decision</div><div class="chips" style="flex-wrap:wrap">${DEC_ORDER.map(d => `<button class="chip" data-act="decide" data-id="${h(id)}" data-v="${d}" aria-pressed="${t.decision === d}">${DEC[d].label}</button>`).join("")}<button class="chip" data-act="thingReset" data-id="${h(id)}">Back to unsorted</button></div>
     ${t.itemId && S.items[t.itemId] ? `<button class="btn" data-act="open" data-id="${h(t.itemId)}">Open ${h(S.items[t.itemId].sku)} in Items</button>` : ""}
     <div id="thDel"><button class="btn sm danger" data-act="thingDel" data-id="${h(id)}">Delete</button></div></div>`;
@@ -337,7 +385,10 @@ document.addEventListener("click", async e => {
     case "sortUndo": { const last = SORT.hist.pop(); if (!last) break; await saveThing(last.id, last.prev); SORT.cur = last.id; SORT.skipped.delete(last.id); renderSorter(); break; }
     case "thingCam": $("#thingCam").click(); break;
     case "thingLib": $("#thingLib").click(); break;
-    case "nextBin": { const b = $("#sortBin").value.trim(), m = b.match(/^(.*?)(\d+)\s*$/); const nb = m ? m[1] + (+m[2] + 1) : b ? b + " 2" : "Tub 1"; lsSet("mb-bin", nb); render(); toast("Now sorting " + nb); break; }
+    case "nextBin": { const b = lsGet("mb-bin", "").trim(), m = b.match(/^(.*?)(\d+)\s*$/); switchBin(m ? m[1] + (+m[2] + 1) : b ? b + " 2" : "Tote 1"); break; }
+    case "shotUp": setShot(shotNext() + 1); render(); break;
+    case "shotDn": setShot(shotNext() - 1); render(); break;
+    case "glLog": await garageLog(v); break;
     case "sortF": SORT.f = SORT.f === v ? "all" : v; render(); break;
     case "decide": if (!$("#modal").hidden) { $("#modal").hidden = true; $("#modal").innerHTML = ""; } await decide(id, v); break;
     case "fuBack": SORT.pending = null; if (!S.things[SORT.cur] || S.things[SORT.cur].decision !== "undecided") closeSorter(); else renderSorter(); break;
@@ -363,9 +414,11 @@ document.addEventListener("input", e => {
 document.addEventListener("change", e => {
   const t = e.target;
   if (t.id === "thingCam" || t.id === "thingLib") { const f = [...t.files]; t.value = ""; addThingPhotos(f); }
-  if (t.id === "sortBin") lsSet("mb-bin", t.value.trim());
+  if (t.id === "sortBin" && t.value !== lsGet("mb-bin", "")) { lsSet("mb-bin", t.value); render(); }
+  if (t.id === "shotNo") { setShot(parseInt(t.value) || 1); render(); }
+  if (t.id === "glSign") lsSet("mb-sign", t.checked ? "1" : "0");
   if (t.dataset.trash) saveThing(t.dataset.trash, { done: true, doneAt: Date.now() });
-  if (t.dataset.tf) saveThing(t.dataset.id, { [t.dataset.tf]: t.value.trim() });
+  if (t.dataset.tf) saveThing(t.dataset.id, { [t.dataset.tf]: t.dataset.tf === "shot" ? num(t.value) : t.value.trim() });
   if (t.id === "thingName" && SORT.cur && S.things[SORT.cur]) saveThing(SORT.cur, { name: t.value.trim() });
 });
 document.addEventListener("keydown", e => {

@@ -72,7 +72,7 @@ async function copyText(text, btn) {
 }
 
 /* ---------- state & store ---------- */
-const S = { items: {}, settings: { ...DEFAULTS }, audits: {}, expenses: {}, things: {}, donations: {}, tab: "today", filter: { q: "", box: "all", stage: "all" }, open: null, chat: [], tools: "fees", bundle: { sel: {}, pct: 10, plat: "ebay" }, period: "month", exp: { type: "expense" }, delExp: null, offerT: { item: "", amt: "", plat: "ebay" }, msgItem: "", tplEdit: false };
+const S = { items: {}, settings: { ...DEFAULTS }, audits: {}, expenses: {}, things: {}, donations: {}, tab: "today", filter: { q: "", box: "all", stage: "all", bin: "all", sort: "new" }, open: null, chat: [], tools: "fees", bundle: { sel: {}, pct: 10, plat: "ebay" }, period: "month", exp: { type: "expense" }, delExp: null, offerT: { item: "", amt: "", plat: "ebay" }, msgItem: "", tplEdit: false };
 // DB is true once signed in to Supabase; LOCAL is the no-config preview that keeps data in this browser only.
 let DB = false, LOCAL = false;
 let ASSETS = null;
@@ -374,22 +374,31 @@ function renderTabs() {
 }
 const boxTag = b => b ? `<span class="box ${b}"><i></i>${h(BOXES[b])}</span>` : "";
 const stageName = s => (STAGES.find(x => x[0] === (s || "intake")) || STAGES[0])[1];
-function thumb(it) { const p = (it.photos || [])[0]; return p ? `<img class="thumb" src="${h(photoSrc(p))}" alt="" loading="lazy">` : it.thumb ? `<img class="thumb" src="${h(it.thumb)}" alt="">` : `<div class="thumb">no photo</div>`; }
+function thumb(it) { const p = (it.photos || [])[0]; return p ? `<img class="thumb" src="${h(photoSrc(p))}" alt="" loading="lazy">` : it.thumb ? `<img class="thumb" src="${h(it.thumb)}" alt="">` : `<div class="thumb">${it.shot ? "#" + it.shot : "no photo"}</div>`; }
 function itemListHTML() {
   const F = S.filter; const q = F.q.toLowerCase();
   const rows = Object.entries(S.items).filter(([id, it]) =>
-    (F.box === "all" || it.box === F.box) && (F.stage === "all" || (F.stage === "tolist" ? STAGE_IDX[it.stage || "intake"] <= 2 : (it.stage || "intake") === F.stage)) &&
-    (!q || [id, it.sku, it.name, it.brand, it.model, it.official, it.listing && it.listing.ebayTitle].join(" ").toLowerCase().includes(q)));
-  rows.sort((a, b) => (b[1].updatedAt || 0) - (a[1].updatedAt || 0));
+    (F.box === "all" || it.box === F.box) && (F.bin === "all" || (it.bin || "") === F.bin) && (F.stage === "all" || (F.stage === "tolist" ? STAGE_IDX[it.stage || "intake"] <= 2 : (it.stage || "intake") === F.stage)) &&
+    (!q || [id, it.sku, it.name, it.brand, it.model, it.official, it.listing && it.listing.ebayTitle, it.shot ? "#" + it.shot : ""].join(" ").toLowerCase().includes(q)));
+  const by = { new: (a, b) => (b.updatedAt || 0) - (a.updatedAt || 0), old: (a, b) => (a.createdAt || 0) - (b.createdAt || 0),
+    hi: (a, b) => (mainPrice(b) ?? -1) - (mainPrice(a) ?? -1), lo: (a, b) => (mainPrice(a) ?? 1e9) - (mainPrice(b) ?? 1e9),
+    name: (a, b) => (a.name || "").localeCompare(b.name || ""), shot: (a, b) => (a.shot ?? 1e9) - (b.shot ?? 1e9) }[F.sort] || ((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+  rows.sort((a, b) => by(a[1], b[1]));
   return rows.length ? `<div class="list">${rows.map(([id, it]) => itemRow(id, it)).join("")}</div>` :
     `<div class="empty"><b>${Object.keys(S.items).length ? "Nothing matches these filters." : "No items yet."}</b><span class="small">Add items one at a time or paste your whole SKU list on the Add tab.</span><button class="btn primary" data-act="tab" data-v="add">Add items</button></div>`;
+}
+function itemFiltersHTML(F) {
+  const sel = (k, opts) => `<label class="f">${opts.label}<select data-filt="${k}">${opts.list.map(([v, n]) => `<option value="${h(v)}" ${F[k] === v ? "selected" : ""}>${h(n)}</option>`).join("")}</select></label>`;
+  const bins = knownBins();
+  return `<div class="filters">${sel("box", { label: "Box", list: [["all", "All boxes"], ...Object.entries(BOXES)] })}${sel("stage", { label: "Stage", list: [["all", "Any stage"], ["tolist", "To list"], ...STAGES] })}
+    ${bins.length ? sel("bin", { label: "Came from", list: [["all", "Any bin"], ...bins.map(b => [b, b])] }) : ""}${sel("sort", { label: "Sort by", list: [["new", "Recently changed"], ["old", "Oldest first"], ["hi", "Price: high to low"], ["lo", "Price: low to high"], ["name", "Name A–Z"], ["shot", "Camera photo #"]] })}</div>`;
 }
 function itemRow(id, it) {
   const pl = it.plat || {}; const on = Object.keys(PLAT).filter(p => (pl[p] || {}).status === "listed");
   const price = mainPrice(it);
   return `<button class="row-item" data-act="open" data-id="${h(id)}">${thumb(it)}
     <div style="min-width:0"><div class="t">${h(it.name || "Untitled item")}</div>
-    <div class="m"><span class="sku">${h(it.sku || id)}</span>${boxTag(it.box)}<span class="pill ${STAGE_IDX[it.stage] >= 3 ? "on" : ""}">${stageName(it.stage)}</span></div></div>
+    <div class="m"><span class="sku">${h(it.sku || id)}</span>${boxTag(it.box)}<span class="pill ${STAGE_IDX[it.stage] >= 3 ? "on" : ""}">${stageName(it.stage)}</span>${it.shot ? `<span class="small muted">#${it.shot}</span>` : ""}</div></div>
     <div class="r"><div class="mono">${price != null ? money(price) : ""}</div><div class="muted small">${on.map(p => PLAT[p].split(" ")[0]).join(" · ")}</div></div></button>`;
 }
 
@@ -435,8 +444,7 @@ const VIEWS = {
     const F = S.filter;
     return `<div class="card-h"><h1>Items</h1><button class="btn sm primary sp" data-act="tab" data-v="add">Add item</button></div>
       <input type="text" id="q" placeholder="Search SKU, name, brand" value="${h(F.q)}" aria-label="Search items" data-act-input="search">
-      <div class="chips">${[["all", "All boxes"], ...Object.entries(BOXES)].map(([k, n]) => `<button class="chip" data-act="fbox" data-v="${k}" aria-pressed="${F.box === k}">${h(n)}</button>`).join("")}</div>
-      <div class="chips">${[["all", "Any stage"], ["tolist", "To list"], ...STAGES].map(([k, n]) => `<button class="chip" data-act="fstage" data-v="${k}" aria-pressed="${F.stage === k}">${h(n)}</button>`).join("")}</div>
+      ${itemFiltersHTML(F)}
       ${lookupCardHTML()}
       <section class="card" id="itemList">${itemListHTML()}</section>`;
   },
@@ -801,6 +809,7 @@ function renderDetail() {
       <div class="grid2"><label class="f">Box<select data-f="box">${Object.entries(BOXES).map(([k, n]) => `<option value="${k}" ${it.box === k ? "selected" : ""}>${n}</option>`).join("")}</select></label>
       <label class="f">Condition<select data-f="condition"><option value="">Choose…</option>${CONDITIONS.map(c => `<option ${it.condition === c ? "selected" : ""}>${h(c)}</option>`).join("")}</select></label>
       ${fld(it, "brand", "Brand")}${fld(it, "category", "Type / category", { ph: "e.g. video game console" })}
+      <label class="f">Came from<select data-f="bin">${optsHTML(knownBins(), it.bin, { none: "Not set", add: "New bin…" })}</select></label>${fld(it, "shot", "Camera photo #", { num: 1 })}
       ${fld(it, "model", "Model #")}${fld(it, "color", "Color")}${fld(it, "material", "Material")}${fld(it, "official", "Official title")}</div>
       ${lookupInfoHTML(it)}
       ${fld(it, "condNotes", "Flaws & condition notes", { area: true, ph: "Scratches, missing parts, tested and working?" })}
@@ -966,7 +975,7 @@ document.addEventListener("click", async e => {
     case "tab": { const i = TAB_ORDER.indexOf(S.tab), j = TAB_ORDER.indexOf(v); goTab(v, i >= 0 && j >= 0 && i !== j ? Math.sign(j - i) : 0); break; }
     case "open": openDetail(t.dataset.id); break;
     case "close": closeDetail(); break;
-    case "stagejump": S.filter.stage = v; S.filter.box = "all"; S.filter.q = ""; goTab("items", S.tab === "items" ? 0 : 1); break;
+    case "stagejump": S.filter.stage = v; S.filter.box = "all"; S.filter.bin = "all"; S.filter.q = ""; goTab("items", S.tab === "items" ? 0 : 1); break;
     case "fbox": S.filter.box = v; render(); break;
     case "fstage": S.filter.stage = v; render(); break;
     case "tool": S.tools = v; render(); break;
@@ -1067,6 +1076,7 @@ document.addEventListener("change", async e => {
   if (t.dataset.bundle) { S.bundle[t.dataset.bundle] = t.value; render(); return; }
   if (t.dataset.bsel) { S.bundle.sel[t.dataset.bsel] = t.checked; render(); return; }
   if (t.dataset.ship) { S.shipCalc[t.dataset.ship] = t.type === "checkbox" ? t.checked : t.type === "number" ? num(t.value) : t.value; render(); return; }
+  if (t.dataset.filt) { S.filter[t.dataset.filt] = t.value; const l = $("#itemList"); if (l) l.innerHTML = itemListHTML(); return; }
   if (t.dataset.f && S.open) {
     const p = t.dataset.f; const it = S.items[S.open];
     let v = t.type === "checkbox" ? t.checked : t.dataset.num ? num(t.value) : t.value;
