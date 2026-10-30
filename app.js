@@ -1022,9 +1022,10 @@ async function askClaude() {
   catch (e) { if (e && e.code === "cancelled") { S.chat.pop(); cancelled = true; } else S.chat.push({ role: "assistant", content: aiMsg(e) }); }
   render(); if (cancelled && $("#askIn")) $("#askIn").value = q;
 }
-async function exportData() {
+function exportData() {
   const data = JSON.stringify({ exportedAt: new Date().toISOString(), settings: S.settings, items: S.items, audits: S.audits, expenses: S.expenses, things: S.things, donations: S.donations }, null, 2);
-  downloadBlob("mackrobytes-backup-" + today() + ".json", new Blob([data], { type: "application/json" })); toast("Backup saved");
+  // One fixed name so each new backup replaces the last one.
+  downloadBlob("mackrobytes-backup.json", new Blob([data], { type: "application/json" })); toast("Backup saved");
 }
 document.addEventListener("change", async e => {
   const t = e.target;
