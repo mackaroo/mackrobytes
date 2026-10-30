@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#A7B3F2" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#1D1B3C" media="(prefers-color-scheme: dark)">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="MackroBytes">
+  <title>MackroBytes</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icon-180.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&family=Nunito:wght@400;600;700;800&display=swap">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<section id="login" class="center-screen" hidden>
+  <form id="loginForm" class="card" autocomplete="on">
+    <div class="hello">Hello.</div>
+    <p class="muted small" style="margin:0">Sign in to MackroBytes. You only do this once per device.</p>
+    <label class="f">Email<input id="loginEmail" type="email" autocomplete="username" required></label>
+    <label class="f">Password<input id="loginPw" type="password" autocomplete="current-password" required></label>
+    <button class="btn primary" type="submit">Sign in</button>
+    <p id="loginErr" class="small" style="color:var(--bad);margin:0" hidden></p>
+  </form>
+</section>
+
+<header class="top"><div class="wrap">
+  <div class="brand">MackroBytes</div><span class="season" id="season"></span>
+  <div class="sync" id="sync"><span class="dot"></span><span>Connecting…</span></div>
+  <button class="gear" id="toolsBtn" data-act="tab" data-v="tools" aria-label="Seller tools"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 6.5a4 4 0 0 1-5 5L5 16a1.8 1.8 0 0 0 2.5 2.5l4.5-4.5a4 4 0 0 1 5-5l-2.4 2.4-2.1-.4-.4-2.1z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" fill="none"/></svg></button>
+  <button class="gear" id="gear" data-act="tab" data-v="settings" aria-label="Settings"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.6" fill="none"/><path d="M12 2.8v3M12 18.2v3M2.8 12h3M18.2 12h3M5.5 5.5l2.1 2.1M16.4 16.4l2.1 2.1M5.5 18.5l2.1-2.1M16.4 7.6l2.1-2.1" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
+</div></header>
+<main id="main"><div class="wrap"><div class="empty">Loading your inventory…</div></div></main>
+<nav class="tabs" aria-label="Sections"><div class="row" id="tabs"></div></nav>
+<div id="sheet" hidden></div>
+<div id="sorter" class="sorter" hidden></div>
+<div id="editor" hidden></div>
+<div id="modal" class="modal" hidden></div>
+<div id="toast" class="toast" hidden></div>
+<input type="file" id="camIn" accept="image/*" capture="environment" hidden>
+<input type="file" id="libIn" accept="image/*" multiple hidden>
+<input type="file" id="thingCam" accept="image/*" capture="environment" hidden>
+<input type="file" id="thingLib" accept="image/*" multiple hidden>
+<input type="file" id="importIn" accept="application/json,.json" hidden>
+
+<script src="config.js"></script>
+<script>
+  // Only load the database library once config.js has real values; otherwise the app runs as a local preview.
+  if (window.CONFIG && CONFIG.SUPABASE_URL && !CONFIG.SUPABASE_URL.startsWith("YOUR")) {
+    document.write('<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.0/dist/umd/supabase.js"><\/script><script src="store.js"><\/script>');
+  }
+</script>
+<script src="features.js"></script>
+<script src="app.js"></script>
+<script>if ("serviceWorker" in navigator && location.protocol === "https:") navigator.serviceWorker.register("sw.js").catch(() => {});</script>
+</body>
+</html>
