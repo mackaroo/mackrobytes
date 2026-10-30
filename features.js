@@ -23,17 +23,13 @@ async function newItem(fields) {
   await saveItem(id, { sku, box: "hobby", stage: "intake", createdAt: Date.now(), ...fields }, { create: true });
   useSku(sku); return id;
 }
-// "Tinker Bell lamp $25" -> item named "Tinker Bell lamp" priced $25 on eBay.
 async function quickAdd(text) {
-  text = String(text || "").trim(); if (!text) return;
-  const m = text.match(/^(.*?)\s*\$\s*(\d+(?:\.\d{1,2})?)\s*$/);
-  const name = (m ? m[1] : text).trim(), price = m ? +m[2] : null;
-  if (!name) { toast("Type what it is first."); return; }
-  const id = await newItem({ name, ...(price != null ? { prices: { ebay: price } } : {}) });
+  const name = String(text || "").trim(); if (!name) return;
+  const id = await newItem({ name });
   toast("Added " + S.items[id].sku, { label: "Open", fn: () => openDetail(id) });
 }
 function quickAddHTML() {
-  return `<form class="quick" data-quick><input type="text" name="q" placeholder="Quick add: Tinker Bell lamp $25" aria-label="Quick add an item" enterkeyhint="done" autocomplete="off"><button class="btn primary" type="submit">Add</button></form>`;
+  return `<form class="quick" data-quick><input type="text" name="q" placeholder="Quick add: Tinker Bell lamp" aria-label="Quick add an item" enterkeyhint="done" autocomplete="off"><button class="btn primary" type="submit">Add</button></form>`;
 }
 document.addEventListener("submit", e => {
   const f = e.target.closest("[data-quick]"); if (!f) return;
@@ -363,7 +359,7 @@ function worthHTML() {
 async function sellThing() {
   const { id } = SORT.pending, t = S.things[id], r = worthCalc();
   const itemId = await newItem({ name: t.name || "Untitled item", stage: t.photo ? "photographed" : "intake", photos: t.photo ? [t.photo] : [],
-    ...(r ? { prices: { ebay: r.price, fb: r.price }, weightOz: r.oz } : {}), condNotes: t.bin ? "From " + t.bin : "", fromThing: id });
+    ...(r ? { weightOz: r.oz } : {}), condNotes: t.bin ? "From " + t.bin : "", fromThing: id });
   await commit(id, { decision: "sell", itemId, value: r ? r.price : t.value || null });
   toast("Added " + S.items[itemId].sku + " to Items", { label: "Open", fn: () => { closeSorter(); openDetail(itemId); } });
 }
@@ -489,7 +485,7 @@ async function runPriceCheck(q, id) {
   let r; try { r = await ai({ prompt: priceCheckPrompt(q, id ? S.items[id] : null), json: true }); } catch (e) { if (e && e.code !== "cancelled") toast(aiMsg(e)); return; }
   if (!r || typeof r !== "object") { toast(aiMsg({ code: "invalid_json" })); return; }
   r.q = q; r.at = Date.now();
-  if (id) { await saveItem(id, { priceCheck: r }); toast("Price check saved to this item"); return; }
+  if (id) { await saveItem(id, { priceCheck: r, ...pcItemPatch(r, S.items[id]) }); toast("Price check saved to this item"); return; }
   PC.q = q; PC.res = r; lsSet("mb-pc", JSON.stringify(PC)); renderSoon();
 }
 function pcResultHTML(r, ctx) {
@@ -511,7 +507,7 @@ function pcResultHTML(r, ctx) {
     <div class="small ${ok ? "pos" : "neg"}" style="font-weight:700">${ok ? "Worth listing." : "Under " + money(min) + ". Bundle or donate."}${num(r.quickSale) ? ` <span class="muted" style="font-weight:600">Quick-sale price: ${money(num(r.quickSale))}.</span>` : ""}</div>
     ${r.tips && r.tips.length ? `<ul class="small" style="margin:0;padding-left:18px">${r.tips.slice(0, 4).map(t => `<li>${h(t)}</li>`).join("")}</ul>` : ""}
     ${r.verify && r.verify.length ? `<div class="banner"><b>Check:</b> ${r.verify.map(h).join(" · ")}</div>` : ""}
-    <div class="btns">${ctx === "item" ? `<button class="btn primary" data-act="pcUse">Use these prices</button>` : `<button class="btn primary" data-act="pcAdd">Add as item</button>`}
+    <div class="btns">${ctx === "item" ? "" : `<button class="btn primary" data-act="pcAdd">Add as item</button>`}
       <a class="btn sm" target="_blank" rel="noopener" href="https://www.ebay.com/sch/i.html?_nkw=${q}&LH_Sold=1&LH_Complete=1">eBay sold ↗</a>
       ${(r.sources || []).filter(u => /^https?:\/\//.test(u)).slice(0, 2).map((u, i) => `<a class="btn sm" target="_blank" rel="noopener" href="${h(u)}">Source ${i + 1} ↗</a>`).join("")}</div>
     <div class="small muted">Checked ${new Date(r.at || Date.now()).toLocaleDateString()}</div></div>`;
@@ -521,16 +517,10 @@ function priceCheckCardHTML() {
     <form class="quick" data-pc><input type="text" name="q" value="${h(PC.q)}" placeholder="Name or model #" aria-label="Item name or model number" enterkeyhint="search" autocomplete="off"><button class="btn primary" type="submit">Research</button></form>
     ${PC.res ? pcResultHTML(PC.res, "home") + `<div class="btns"><button class="btn sm ghost" data-act="pcClear">Clear</button></div>` : ""}`, { open: !!PC.res });
 }
-// What a price check fills on an item. Only blank details get filled; prices are replaced.
+// What a price check fills on an item: only blank details, plus the suggested platform if none is picked.
 function pcItemPatch(r, it = {}) {
-  const { rows } = pcRows(r), fit = {}, plat = {};
-  rows.forEach(x => { fit[x.p] = { fit: x.x.fit || "good", why: x.x.why || "" }; if (x.x.fit !== "skip" && !((it.plat || {})[x.p] || {}).status) plat[x.p] = { status: "planned" }; });
-  const line = `Price check ${new Date(r.at || Date.now()).toLocaleDateString()}: sold ${money(num(r.soldLow))}–${money(num(r.soldHigh))}, typical ${money(num(r.soldTypical))}${num(r.salesFound) ? " (" + num(r.salesFound) + " sales)" : ""}`;
-  const p = { prices: Object.fromEntries(rows.map(x => [x.p, x.price || null])), comps: it.comps ? it.comps + "\n" + line : line,
-    ai: { platformFit: fit, pricing: { confidence: r.confidence || "", rationale: line + ". " + (r.speed || ""), quickSale: num(r.quickSale), compSearch: r.compSearch || "" } } };
-  if (Object.keys(plat).length) p.plat = plat;
-  if (num(it.floor) == null && num(r.quickSale)) p.floor = num(r.quickSale);
-  if (r.compSearch) p.listing = { compSearch: r.compSearch };
+  const p = {};
+  if (!it.listOn && PLAT[r.best]) p.listOn = r.best === "fb" ? "fblocal" : r.best;
   if (num(it.weightOz) == null && num(r.weightOz)) p.weightOz = num(r.weightOz);
   if (!it.model && r.model) p.model = r.model;
   return p;
@@ -549,20 +539,17 @@ document.addEventListener("click", async e => {
       toast("Added " + S.items[id].sku, { label: "Open", fn: () => openDetail(id) }); break; }
     case "pcItem": { const it = S.open && S.items[S.open]; if (!it) break;
       runPriceCheck([it.brand, it.model, it.official || it.name].filter(Boolean).join(" "), S.open); break; }
-    case "pcUse": { const it = S.open && S.items[S.open]; if (!it || !it.priceCheck) break;
-      await saveItem(S.open, pcItemPatch(it.priceCheck, it)); toast("Prices filled in from the price check"); break; }
   }
 });
 
 /* ---------- home overview: every item in one list, plus the laptop sidebar ---------- */
 const HOME = { stage: "all", q: "" };
 const HOME_STAGES = [["all", "All"], ["tolist", "To list"], ["listed", "Listed"], ["sold", "To ship"], ["shipped", "Shipped"], ["complete", "Done"], ["info", "Needs info"]];
-// Unsold items missing details: same checks as the "Needs attention" rules for photos, title, price and weight.
+// Unsold items missing details: same checks as the "Needs attention" rules for photos, listing text, price check and weight.
 function needsInfo(it) {
   const stg = STAGE_IDX[it.stage || "intake"]; if (stg >= 4 || it.stage === "sold") return false;
-  const pr = it.prices || {};
-  return !it.name || (stg >= 1 && (it.photos || []).length < 3) || (stg >= 1 && num(it.weightOz) == null) ||
-    (stg >= 2 && !(it.listing && it.listing.ebayTitle)) || (stg >= 2 && !num(pr.ebay) && !num(pr.depop) && !num(pr.fb));
+  return !it.name || (stg >= 1 && (it.photos || []).length < 3) || (stg >= 1 && it.listOn !== "fblocal" && num(it.weightOz) == null) ||
+    (stg >= 2 && !hasCopy(it, it.listOn)) || (stg >= 2 && mainPrice(it) == null);
 }
 const inHomeStage = (it, k) => k === "all" || (k === "info" ? needsInfo(it) : k === "tolist" ? STAGE_IDX[it.stage || "intake"] <= 2 : (it.stage || "intake") === k);
 function homeListHTML() {

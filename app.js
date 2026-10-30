@@ -192,12 +192,14 @@ function netFor(p, { price, ship = 0, label = 0, pkg = 0, cost = 0, local = fals
   const net = price + ship - fees - label - pkg - (cost || 0);
   return { gross: price + ship, fees, lines, label, pkg, cost: cost || 0, net, ship };
 }
-// The four payout columns: eBay, Depop, FB shipped, FB local pickup.
-const FEE_COLS = [["ebay", false], ["depop", false], ["fb", false], ["fb", true]];
-// The price shown in lists: eBay first, then Depop, then FB.
-const mainPrice = it => num((it.prices || {}).ebay) ?? num((it.prices || {}).depop) ?? num((it.prices || {}).fb);
+// The price shown in lists: the price check's typical sold price (older items may still have typed-in prices).
+const mainPrice = it => num((it.priceCheck || {}).soldTypical) ?? num((it.prices || {}).ebay) ?? num((it.prices || {}).depop) ?? num((it.prices || {}).fb);
+const listPrice = (it, p) => num((it.prices || {})[p]) ?? mainPrice(it);
+// Where the item is being listed: one main platform, with FB split into shipped and local pickup.
+const LIST_PLAT = { ebay: "ebay", depop: "depop", fb: "fb", fblocal: "fb" };
+const hasCopy = (it, on) => { const L = it.listing || {}; const p = LIST_PLAT[on]; return !!(p === "ebay" ? L.ebayTitle : p === "depop" ? L.depopDesc : p === "fb" ? L.fbTitle : L.ebayTitle || L.depopDesc || L.fbTitle); };
 function itemNet(it, p, local) {
-  const sp = shipPlan(it); const price = num((it.prices || {})[p]);
+  const sp = shipPlan(it); const price = listPrice(it, p);
   const label = num(it.labelCost) ?? sp.cost ?? 0;
   const ship = it.freeShip ? 0 : (num(it.shipCharge) ?? label);
   return netFor(p, { price, ship, label, pkg: pkgCost(sp.pkg), cost: num(it.cost) || 0, local });
@@ -212,17 +214,14 @@ function ruleFindings() {
     if (it.stage === "sold") { const d = daysSince(it.sale && it.sale.date); const where = "Grab " + (it.sku || id) + " from the " + (BOXES[it.box] || "") + " box."; if (d != null && d >= (num(S.settings.handlingDays) || 1)) add("high", "sold " + d + " day(s) ago and not shipped yet", where + " Ship today to protect your handling-time metrics."); else add("med", "sold, ship within your handling time", where + " Print the label and pack it."); continue; }
     if (stg >= 4) continue;
     if (stg >= 1 && photos < 3) add("med", "only " + photos + " photo(s)", "Aim for 8–12: front, back, labels, flaws, scale.");
-    if (stg >= 2 && !(it.listing && it.listing.ebayTitle)) add("med", "drafted but no title yet", "Run Write my listing.");
+    if (stg >= 2 && !hasCopy(it, it.listOn)) add("med", "drafted but no listing text yet", "Pick where it's listing, then Write my listing.");
     if (it.listing && (it.listing.ebayTitle || "").length > 80) add("high", "eBay title is over 80 characters", "Trim it or eBay will reject it.");
-    if (stg >= 2 && !num((it.prices || {}).ebay) && !num((it.prices || {}).depop) && !num((it.prices || {}).fb)) add("med", "no price set", "Check sold comps and set a price.");
-    if (num(it.weightOz) == null && stg >= 1) add("low", "no weight", "Weigh it so shipping and net payout are accurate.");
+    if (stg >= 2 && mainPrice(it) == null) add("med", "no price check yet", "Run Price check to see what it sells for.");
+    if (num(it.weightOz) == null && stg >= 1 && it.listOn !== "fblocal") add("low", "no weight", "Weigh it so shipping and net payout are accurate.");
     const pl = it.plat || {};
     for (const p of Object.keys(PLAT)) { const x = pl[p] || {}; if (x.status === "listed") { const d = daysSince(x.listedAt); if (d != null && d >= st) add("med", PLAT[p] + " listing is " + d + " days old with no sale", p === "ebay" ? "Send offers to watchers, or lower the price 10% and refresh the photos." : p === "depop" ? "Refresh the listing, send offers to likers, or lower the price 10%." : "Renew the listing and drop the price a little."); } }
     const listedOn = Object.keys(PLAT).filter(p => (pl[p] || {}).status === "listed");
-    const fit = (it.ai && it.ai.platformFit) || {};
-    const missing = Object.keys(PLAT).filter(p => !listedOn.includes(p) && fit[p] && fit[p].fit !== "skip");
-    if (listedOn.length && missing.length) add("low", "could also go on " + missing.map(p => PLAT[p]).join(", "), "Crosslist it for more reach. Remove the other listings when it sells.");
-    for (const p of listedOn) { const n = itemNet(it, p, false); if (num((it.prices || {})[p]) && n.net < 3) add("high", "nets only " + money(n.net) + " on " + PLAT[p], "Raise the price, charge for shipping, or bundle it."); }
+    for (const p of listedOn) { const n = itemNet(it, p, false); if (listPrice(it, p) != null && n.net < 3) add("high", "nets only " + money(n.net) + " on " + PLAT[p], "Raise the price, charge for shipping, or bundle it."); }
   }
   const rank = { high: 0, med: 1, low: 2 };
   return out.sort((a, b) => rank[a.sev] - rank[b.sev]);
@@ -247,9 +246,9 @@ function itemForAI(it, id) {
   return {
     sku: it.sku || id, name: it.name, box: BOXES[it.box], brand: it.brand, category: it.category, condition: it.condition,
     flawsAndConditionNotes: it.condNotes, included: it.included, costBasis: num(it.cost), weightOz: num(it.weightOz), dimsIn: it.dims,
-    stage: it.stage, prices: it.prices, floor: it.floor, listedOn: Object.fromEntries(Object.entries(it.plat || {}).map(([p, x]) => [p, { status: x.status, daysListed: daysSince(x.listedAt) }])),
+    stage: it.stage, listingOn: it.listOn, marketValue: it.priceCheck ? { low: num(it.priceCheck.soldLow), typical: num(it.priceCheck.soldTypical), high: num(it.priceCheck.soldHigh) } : null, listedOn: Object.fromEntries(Object.entries(it.plat || {}).map(([p, x]) => [p, { status: x.status, daysListed: daysSince(x.listedAt) }])),
     engagement: it.engagement, soldCompsSellerFound: it.comps, shippingEstimate: { service: sp.service, packaging: PKG_NAME[sp.pkg], packedOz: sp.packedOz, labelCost: sp.cost },
-    currentTitle: it.listing && it.listing.ebayTitle
+    currentTitle: it.listing && (it.listing.ebayTitle || it.listing.fbTitle)
   };
 }
 function looseJSON(t) {
@@ -284,8 +283,23 @@ function manualAI(prompt, attach) {
     $("#mUse").onclick = () => { const v = $("#mAns").value.trim(); if (!v) { toast("Paste Claude's reply first."); return; } close(); resolve(v); };
   });
 }
-function listingPrompt(it, id, nPhotos) {
-  return `You are a senior e-commerce listing specialist helping a reseller list an item on eBay, Depop and Facebook Marketplace.
+function listingPrompt(it, id, nPhotos, on) {
+  const s = S.settings, p = LIST_PLAT[on], local = on === "fblocal";
+  const rules = {
+    ebay: `- Title: at most 80 characters, keyword-first (Brand, Model/Line, key specs, size/color, condition when it matters).
+- Description: plain text in short paragraphs: what it is; honest condition with every flaw; what's included; measurements/specs; then "Ships from Michigan within ${s.handlingDays} business day. Thanks for shopping ${s.shopName}!"
+- Item specifics: fill as many accurate ones as possible. categoryHint: the best eBay category.`,
+    depop: `- Description: the first line works as the title (Depop search reads it), casual but clear; then condition, measurements, a short style note.
+- Keywords: up to 5 search keywords.`,
+    fb: `- Title: plain, under 100 characters.
+- Description: short and friendly; mention ${local ? "local pickup near " + s.city : "shipping, or pickup near " + s.city}. Never mention ${s.shopName}.`
+  }[p];
+  const shape = {
+    ebay: `{"identified":"one line","verify":["..."],"title":"...","description":"...","itemSpecifics":[["Brand","..."]],"categoryHint":"...","photoTips":["..."]}`,
+    depop: `{"identified":"one line","verify":["..."],"description":"...","keywords":["..."],"photoTips":["..."]}`,
+    fb: `{"identified":"one line","verify":["..."],"title":"...","description":"...","photoTips":["..."]}`
+  }[p];
+  return `You are a senior e-commerce listing specialist writing a ${platName4(on)} listing for a reseller.
 
 ${profileText()}
 
@@ -295,17 +309,11 @@ ${JSON.stringify(itemForAI(it, id), null, 1)}
 PHOTOS: ${nPhotos ? nPhotos + " photo(s) of the actual item are attached. Use them to identify brand, model, color, size, material and visible condition. Never invent details you can't see or that weren't given; put anything uncertain in \"verify\"." : "No photos attached. Work from the notes only and put anything uncertain in \"verify\"."}
 
 RULES
-- eBay title: at most 80 characters, keyword-first (Brand, Model/Line, key specs, size/color, condition when it matters). No ALL CAPS, no emojis, no "L@@K", no words like "rare" unless true.
-- eBay description: plain text in short paragraphs: what it is; honest condition with every flaw; what's included; measurements/specs; then "Ships from Michigan within ${S.settings.handlingDays} business day. Thanks for shopping ${S.settings.shopName}!"
-- eBay item specifics: fill as many accurate ones as possible.
-- Depop description: the first line works as the title (Depop search reads it), casual but clear; then condition, measurements, a short style note. Also give up to 5 search keywords.
-- Facebook Marketplace: plain title under 100 characters and a short friendly description that mentions pickup near ${S.settings.city} or shipping. Never mention ${S.settings.shopName}.
-- Pricing: you have no live market data. Base prices on your knowledge plus any sold comps the seller pasted, and state your confidence. Give a list price for each platform (FB local can be a little lower because it has no fees), a floor price (lowest the seller should accept), a quick-sale price, eBay Best Offer auto-accept and auto-decline amounts, and the best search phrase for checking sold comps.
-- Platform fit: rate each platform "best", "good" or "skip" for this item, with one line on why.
-- Shipping: the cheapest safe service and packaging from this seller's supplies.
+- No ALL CAPS, no emojis, no "L@@K", no words like "rare" unless true. Be honest about every flaw.
+${rules}
 
-Reply with ONLY one JSON object in exactly this shape (numbers in USD, no $ signs):
-{"identified":"one line","verify":["..."],"platformFit":{"ebay":{"fit":"best","why":"..."},"depop":{"fit":"good","why":"..."},"fb":{"fit":"skip","why":"..."}},"ebay":{"title":"...","description":"...","itemSpecifics":[["Brand","..."]],"categoryHint":"...","price":0,"bestOfferAccept":0,"bestOfferDecline":0},"depop":{"description":"...","keywords":["..."],"price":0},"fb":{"title":"...","description":"...","price":0},"pricing":{"floor":0,"quickSale":0,"confidence":"medium","rationale":"...","compSearch":"..."},"shipping":{"service":"...","packaging":"...","notes":"..."},"photoTips":["..."]}`;
+Reply with ONLY one JSON object in exactly this shape:
+${shape}`;
 }
 /* ---------- photos ---------- */
 const memPhotos = {}; // preview-only blobs when there's no asset store
@@ -574,7 +582,7 @@ const TOOLS = {
     if (sel.length >= 2) {
       const p = B.plat; const pct = num(B.pct) || 0;
       const sepNet = sel.reduce((a, [, it]) => a + itemNet(it, p, false).net, 0);
-      const subtotal = sel.reduce((a, [, it]) => a + (num((it.prices || {})[p]) || 0), 0);
+      const subtotal = sel.reduce((a, [, it]) => a + (listPrice(it, p) || 0), 0);
       const sepShip = sel.reduce((a, [, it]) => a + (num(it.labelCost) ?? shipPlan(it).cost ?? 0), 0);
       const totOz = sel.reduce((a, [, it]) => a + (num(it.weightOz) || 0), 0);
       const anyFragile = sel.some(([, it]) => it.box === "fragile");
@@ -591,7 +599,7 @@ const TOOLS = {
     return `<section class="card"><h2>Bundle discount check</h2>
       <div class="grid2"><label class="f">Platform<select data-bundle="plat">${Object.entries(PLAT).map(([k, n]) => `<option value="${k}" ${B.plat === k ? "selected" : ""}>${n}</option>`).join("")}</select></label><label class="f">Bundle discount %<input type="number" inputmode="decimal" data-bundle="pct" value="${h(B.pct)}"></label></div>
       ${out}
-      <div class="list">${cand.length ? cand.map(([id, it]) => `<label class="check" style="padding:6px 0;border-top:1px solid var(--line)"><input type="checkbox" data-bsel="${h(id)}" ${B.sel[id] ? "checked" : ""}><span style="min-width:0;flex:1">${h(it.sku || id)} <span class="sku">${h(it.name || "")}</span></span><span class="mono small">${money(num((it.prices || {})[B.plat]))}</span></label>`).join("") : `<p class="muted small">No unsold items yet.</p>`}</div>
+      <div class="list">${cand.length ? cand.map(([id, it]) => `<label class="check" style="padding:6px 0;border-top:1px solid var(--line)"><input type="checkbox" data-bsel="${h(id)}" ${B.sel[id] ? "checked" : ""}><span style="min-width:0;flex:1">${h(it.sku || id)} <span class="sku">${h(it.name || "")}</span></span><span class="mono small">${money(listPrice(it, B.plat))}</span></label>`).join("") : `<p class="muted small">No unsold items yet.</p>`}</div>
     </section>
     <section class="card flat"><h2>Tips</h2><details class="tips"><summary>eBay</summary><ul><li>Set up combined shipping discounts in your shipping preferences so multi-item buyers pay for one shipment.</li><li>Volume pricing (buy 2, save X%) is under Seller Hub, Marketing. It works best on related items, like accessories for the same console.</li><li>Accept bundle offers through Best Offer or a custom invoice. Never take payment off eBay.</li></ul></details>
       <details class="tips"><summary>Depop</summary><ul><li>Turn on bundle discounts in your shop settings. Buyers bundle items from your shop, and the discount applies automatically.</li><li>A tiered discount (say 10% for 2, 15% for 3+) gets buyers browsing your whole shop. Depop rewards that engagement.</li></ul></details>
@@ -704,7 +712,7 @@ function fillTpl(text, it, extra = {}) {
 const niceRound = x => x >= 20 ? Math.round(x) : Math.round(x * 2) / 2;
 function netAt(it, p, price) { const sp = shipPlan(it); const label = num(it.labelCost) ?? sp.cost ?? 0; const ship = it.freeShip ? 0 : (num(it.shipCharge) ?? label); return netFor(p, { price, ship, label, pkg: pkgCost(sp.pkg), cost: num(it.cost) || 0 }).net; }
 function offerCalc(it, plat, offer) {
-  const pr = it.prices || {}; const list = num(pr[plat]) ?? mainPrice(it);
+  const list = listPrice(it, plat);
   if (list == null) return { err: "Set a price for this item first." };
   const floor = num(it.floor) ?? niceRound(list * 0.8); const guessed = num(it.floor) == null;
   let verdict, why, counter = null, tpl = "t4";
@@ -828,25 +836,30 @@ function copyField(it, p, label, opts = {}) {
   return `<div class="copyfield"><div class="lbl"><label for="${fid(p)}">${label}</label>${max ? `<span class="count ${String(v).length > max ? "over" : ""}" data-count="${p}">${String(v).length}/${max}</span>` : ""}<button class="btn sm sp" data-act="copy" data-from="${fid(p)}">Copy</button></div>
     ${opts.area ? `<textarea id="${fid(p)}" data-f="${p}" ${max ? `data-max="${max}"` : ""} style="min-height:${opts.tall ? 160 : 84}px">${h(v)}</textarea>` : `<input type="text" id="${fid(p)}" data-f="${p}" ${max ? `data-max="${max}"` : ""} value="${h(v)}">`}</div>`;
 }
-function moneySection(it) {
-  const rows = FEE_COLS.filter(([p]) => num((it.prices || {})[p]) != null).map(([p, local]) => ({ p, local, r: itemNet(it, p, local) }));
-  const name = r => r.p === "fb" ? (r.local ? "FB local" : "FB shipped") : PLAT[r.p];
-  return rows.length ? `<div class="cmp">${rows.map(r => `<div class="cmp-c"><span>${name(r)}</span><b class="${r.r.net >= 0 ? "pos" : "neg"}">${money(r.r.net)}</b><span>fees ${money(r.r.fees)}</span></div>`).join("")}</div>` : `<p class="small muted">Add a price to see what you keep.</p>`;
-}
-function shipSection(it) {
-  const sp = shipPlan(it);
-  return `<div class="stats"><div class="stat"><b>${money(sp.cost)}</b><span>${h(sp.service)}</span></div><div class="stat"><b>${sp.packedOz ?? "—"} oz</b><span>packed weight</span></div><div class="stat"><b>${h(PKG_NAME[sp.pkg])}</b><span>packaging</span></div></div>
-    ${sp.notes.length ? `<ul class="small" style="margin:0;padding-left:18px">${sp.notes.map(n => `<li>${h(n)}</li>`).join("")}</ul>` : ""}
-    ${it.ai && it.ai.shipping ? `<p class="small"><b>Claude:</b> ${h(it.ai.shipping.service)}, ${h(it.ai.shipping.packaging)}. ${h(it.ai.shipping.notes || "")}</p>` : ""}`;
-}
-function researchLinks(it) {
-  const q = encodeURIComponent((it.listing && it.listing.compSearch) || it.name || "");
-  return `<div class="btns"><a class="btn sm" target="_blank" rel="noopener" href="https://www.ebay.com/sch/i.html?_nkw=${q}&LH_Sold=1&LH_Complete=1">eBay sold</a><a class="btn sm" target="_blank" rel="noopener" href="https://www.depop.com/search/?q=${q}">Depop</a><a class="btn sm" target="_blank" rel="noopener" href="https://www.facebook.com/marketplace/search/?query=${q}">FB Marketplace</a></div>`;
+const platName4 = k => (PLAT4.find(x => x[0] === k) || [k, PLAT[k] || k])[1];
+// One platform at a time: pick it, write the copy for it, then tick every place it's live.
+function listingHTML(it) {
+  const on = it.listOn || "", p = LIST_PLAT[on], L = it.listing || {}, A = it.ai || {}, pl = it.plat || {};
+  const copy = p === "ebay" ? `${copyField(it, "listing.ebayTitle", "Title", { max: 80 })}${copyField(it, "listing.ebayDesc", "Description", { area: true, tall: 1 })}
+      ${L.ebaySpecifics && L.ebaySpecifics.length ? `<div class="copyfield"><div class="lbl">Item specifics${L.category ? " · " + h(L.category) : ""}<button class="btn sm sp" data-act="copy" data-from="specs">Copy all</button></div><textarea id="specs" readonly class="small">${h(L.ebaySpecifics.map(([k, v]) => k + ": " + v).join("\n"))}</textarea></div>` : ""}`
+    : p === "depop" ? `${copyField(it, "listing.depopDesc", "Description (first line acts as the title)", { area: true, tall: 1 })}${copyField(it, "listing.depopKeywords", "Keywords")}`
+    : p === "fb" ? `${copyField(it, "listing.fbTitle", "Title", { max: 100 })}${copyField(it, "listing.fbDesc", "Description", { area: true })}` : "";
+  const url = p && (pl[p] || {}).url;
+  return `<label class="f">Listing on<select data-f="listOn"><option value="">Choose a platform…</option>${PLAT4.map(([k, n]) => `<option value="${k}" ${on === k ? "selected" : ""}>${n}</option>`).join("")}</select></label>
+    <div class="btns"><button class="btn primary" data-act="gen" ${on ? "" : "disabled"}>${hasCopy(it, on) ? "Rewrite listing" : "Write my listing"}</button></div>
+    <div id="genStatus"></div>
+    ${on && A.identified ? `<p class="small"><b>Claude sees:</b> ${h(A.identified)}</p>` : ""}
+    ${on && A.verify && A.verify.length ? `<div class="banner"><b>Check before posting:</b> ${A.verify.map(h).join(" · ")}</div>` : ""}
+    ${copy}
+    ${on && A.photoTips && A.photoTips.length ? `<details class="tips"><summary>Photo tips for this item</summary><ul>${A.photoTips.map(t => `<li>${h(t)}</li>`).join("")}</ul></details>` : ""}
+    ${p ? `<div class="btns" style="flex-wrap:nowrap"><input type="url" data-f="plat.${p}.url" id="${fid("plat." + p + ".url")}" placeholder="Listing link" aria-label="Listing link" value="${h(url || "")}">${/^https?:\/\//i.test(url || "") ? `<a class="btn sm" href="${h(url)}" target="_blank" rel="noopener">Open</a>` : ""}</div>` : ""}
+    <div class="eyebrow">Live on</div>
+    <div class="btns">${Object.entries(PLAT).map(([k, n]) => { const x = pl[k] || {}; return `<label class="check"><input type="checkbox" data-live="${k}" ${x.status === "listed" ? "checked" : ""}>${n}${x.status === "listed" && x.listedAt ? ` <span class="small muted">${daysSince(x.listedAt)}d</span>` : ""}</label>`; }).join("")}</div>`;
 }
 function renderDetail() {
   const id = S.open; const it = S.items[id]; if (!it) return; detailSig = sig(it);
   const sheet = $("#sheet"); const body = $(".sheet-body", sheet); const y = body ? body.scrollTop : 0;
-  const L = it.listing || {}; const A = it.ai || {}; const pl = it.plat || {};
+  const pl = it.plat || {};
   const photos = it.photos || [];
   sheet.className = "sheet";
   sheet.innerHTML = `<div class="sheet-top"><div class="wrap"><button class="btn sm" data-act="close" title="Back (Esc)">‹ Back</button>${boxTag(it.box)}
@@ -864,58 +877,17 @@ function renderDetail() {
     ${fold("dDetails", "Details", `
       <div class="grid2"><label class="f">Box<select data-f="box">${Object.entries(BOXES).map(([k, n]) => `<option value="${k}" ${it.box === k ? "selected" : ""}>${n}</option>`).join("")}</select></label>
       <label class="f">Condition<select data-f="condition"><option value="">Choose…</option>${CONDITIONS.map(c => `<option ${it.condition === c ? "selected" : ""}>${h(c)}</option>`).join("")}</select></label>
-      ${fld(it, "brand", "Brand")}${fld(it, "category", "Type / category", { ph: "e.g. video game console" })}
-      <label class="f">Came from<select data-f="bin">${optsHTML(knownBins(), it.bin, { none: "Not set", add: "New bin…" })}</select></label>${fld(it, "shot", "Camera photo #", { num: 1 })}
-      ${fld(it, "model", "Model #")}${fld(it, "color", "Color")}${fld(it, "material", "Material")}${fld(it, "official", "Official title")}</div>
+      ${fld(it, "brand", "Brand", { ph: "Blank if unknown" })}${fld(it, "model", "Model #")}</div>
       ${lookupInfoHTML(it)}
       ${fld(it, "condNotes", "Flaws & condition notes", { area: true, ph: "Scratches, missing parts, tested and working?" })}
       ${fld(it, "included", "What's included", { ph: "Charger, box, manual…" })}
-      <div class="grid4">${fld(it.costPre == null && it.cost != null ? { ...it, costPre: it.cost } : it, "costPre", "You paid (before tax) $", { num: 1, ph: "+" + (num(S.settings.buyTaxPct) ?? 6) + "% tax auto" })}${fld(it, "weightOz", "Weight (oz)", { num: 1 })}${fld(it, "dims.l", "L (in)", { num: 1 })}${fld(it, "dims.w", "W (in)", { num: 1 })}</div>
-      <div class="grid4">${fld(it, "dims.h", "H (in)", { num: 1 })}</div>
-      <div class="btns"><label class="check"><input type="checkbox" data-f="flat" ${it.flat ? "checked" : ""}> Flat card / coin</label><label class="check"><input type="checkbox" data-f="media" ${it.media ? "checked" : ""}> Book / CD / DVD</label></div>`, { open: true })}
+      <div class="grid2">${fld(it.costPre == null && it.cost != null ? { ...it, costPre: it.cost } : it, "costPre", "You paid (before tax) $", { num: 1, ph: "+" + (num(S.settings.buyTaxPct) ?? 6) + "% tax auto" })}${it.listOn === "fblocal" ? "" : fld(it, "weightOz", "Weight (oz)", { num: 1 })}</div>`, { open: true })}
 
-    ${fold("dResearch", "Research", `
+    ${fold("dResearch", "Market value", `
       <div class="btns"><button class="btn primary" data-act="pcItem">${it.priceCheck ? "Price check again" : "Price check"}</button></div>
-      ${it.priceCheck ? pcResultHTML(it.priceCheck, "item") : ""}
-      ${researchLinks(it)}
-      ${fld(it, "comps", "Sold comps you found", { area: true, ph: "eBay sold: $42, $38, $45 (used, no box)\nDepop: $40 listed" })}
-      ${fld(it, "engagement", "Views / watchers / likes", { ph: "eBay 120 views, 4 watchers; Depop 9 likes" })}`, { badge: it.priceCheck ? `<span class="pill on">Checked</span>` : "" })}
+      ${it.priceCheck ? pcResultHTML(it.priceCheck, "item") : ""}`, { badge: mainPrice(it) != null ? `<span class="pill on">${money(mainPrice(it))}</span>` : "" })}
 
-    ${fold("dWrite", "Write my listing", `
-      <div class="btns"><button class="btn primary" data-act="gen">${A.generatedAt ? "Rewrite listing" : "Write my listing"}</button></div>
-      <div id="genStatus"></div>
-      ${A.identified ? `<p class="small"><b>Claude sees:</b> ${h(A.identified)}</p>` : ""}
-      ${A.platformFit ? `<div class="eyebrow">Where to list</div><div class="fit">${Object.keys(PLAT).map(p => { const x = A.platformFit[p] || {}; return `<div class="fitc ${h(x.fit)}"><div class="card-h"><b>${PLAT[p]}</b><span class="sp pill ${x.fit === "best" ? "on" : ""}">${h(x.fit || "?")}</span></div><span class="small">${h(x.why || "")}</span></div>`; }).join("")}</div>` : ""}
-      ${A.verify && A.verify.length ? `<div class="banner"><b>Check before posting:</b> ${A.verify.map(h).join(" · ")}</div>` : ""}
-      ${A.pricing ? `<p class="small"><b>Pricing (${h(A.pricing.confidence || "?")} confidence):</b> ${h(A.pricing.rationale || "")}${A.pricing.quickSale ? ` Quick-sale price: <span class="mono">${money(num(A.pricing.quickSale))}</span>.` : ""}</p>` : ""}
-      ${A.photoTips && A.photoTips.length ? `<details class="tips"><summary>Photo tips for this item</summary><ul>${A.photoTips.map(t => `<li>${h(t)}</li>`).join("")}</ul></details>` : ""}`, { open: true, badge: A.generatedAt ? `<span class="muted small">${new Date(A.generatedAt).toLocaleDateString()}</span>` : "" })}
-
-    ${fold("dPrices", "Prices", `
-      <div class="pricegrid">${[["prices.ebay", "eBay"], ["prices.depop", "Depop"], ["prices.fb", "FB"], ["floor", "Floor"]].map(([p, n]) => `<div class="pricebox"><div class="card-h"><label class="eyebrow" for="${fid(p)}">${n}</label><button class="btn sm ghost sp" data-act="copy" data-from="${fid(p)}" style="min-height:24px;padding:2px 6px">Copy</button></div><input type="number" inputmode="decimal" step="0.01" id="${fid(p)}" data-f="${p}" data-num="1" value="${h(getPath(it, p) ?? "")}"></div>`).join("")}</div>
-      ${L.offerAccept || L.offerDecline ? `<p class="small muted">eBay Best Offer: auto-accept at <span class="mono">${money(num(L.offerAccept))}</span>, auto-decline below <span class="mono">${money(num(L.offerDecline))}</span>.</p>` : ""}
-      <div class="eyebrow">You keep</div><div id="moneySec">${moneySection(it)}</div>
-      <div class="grid3">${fld(it, "shipCharge", "Buyer pays shipping $", { num: 1, ph: "= label" })}${fld(it, "labelCost", "Actual label $", { num: 1, ph: "estimate" })}<label class="check" style="align-self:end;padding-bottom:10px"><input type="checkbox" data-f="freeShip" ${it.freeShip ? "checked" : ""}> Free shipping</label></div>`, { open: true })}
-
-    ${STAGE_IDX[it.stage || "intake"] <= 3 ? fold("dOffer", "Offer helper", offerBox(id, "d")) : ""}
-
-    ${fold("dCopy", "Listing copy", `
-      <div class="plat-h"><b>eBay</b></div>
-      ${copyField(it, "listing.ebayTitle", "Title", { max: 80 })}
-      ${copyField(it, "listing.ebayDesc", "Description", { area: true, tall: 1 })}
-      ${L.ebaySpecifics && L.ebaySpecifics.length ? `<div class="copyfield"><div class="lbl">Item specifics${L.category ? " · " + h(L.category) : ""}<button class="btn sm sp" data-act="copy" data-from="specs">Copy all</button></div><textarea id="specs" readonly class="small">${h(L.ebaySpecifics.map(([k, v]) => k + ": " + v).join("\n"))}</textarea></div>` : ""}
-      <hr><div class="plat-h"><b>Depop</b></div>
-      ${copyField(it, "listing.depopDesc", "Description (first line acts as the title)", { area: true, tall: 1 })}
-      ${copyField(it, "listing.depopKeywords", "Keywords")}
-      <hr><div class="plat-h"><b>FB Marketplace</b></div>
-      ${copyField(it, "listing.fbTitle", "Title", { max: 100 })}
-      ${copyField(it, "listing.fbDesc", "Description", { area: true })}`)}
-
-    ${fold("dShip", "Shipping", `<div id="shipSec">${shipSection(it)}</div>
-      <label class="f">Packaging<select data-f="pkg"><option value="">Automatic</option>${Object.entries(PKG_NAME).map(([k, n]) => `<option value="${k}" ${it.pkg === k ? "selected" : ""}>${n}</option>`).join("")}</select></label>`)}
-
-    ${fold("dWhere", "Where it's listed", `
-      ${Object.keys(PLAT).map(p => { const x = pl[p] || {}; return `<div class="grid2" style="align-items:end"><label class="f">${PLAT[p]}<select data-f="plat.${p}.status"><option value="none" ${!x.status || x.status === "none" ? "selected" : ""}>Not listed</option><option value="planned" ${x.status === "planned" ? "selected" : ""}>Planned</option><option value="listed" ${x.status === "listed" ? "selected" : ""}>Listed${x.listedAt ? " · " + daysSince(x.listedAt) + "d" : ""}</option><option value="ended" ${x.status === "ended" ? "selected" : ""}>Ended</option></select></label>
-        <div class="btns" style="flex-wrap:nowrap"><input type="url" data-f="plat.${p}.url" id="${fid("plat." + p + ".url")}" placeholder="Listing link" value="${h(x.url || "")}">${x.url ? `<a class="btn sm" href="${h(x.url)}" target="_blank" rel="noopener">Open</a>` : ""}</div></div>`; }).join("")}`, { badge: (n => n ? `<span class="pill on">${n} live</span>` : "")(Object.keys(PLAT).filter(p => (pl[p] || {}).status === "listed").length) })}
+    ${fold("dListing", "Listing", listingHTML(it), { open: true, badge: it.listOn ? `<span class="muted small">${h(platName4(it.listOn))}</span>` : "" })}
 
     <section class="card"><h2>Sale</h2>
       ${it.sale && it.stage === "sold" ? `<div class="pick"><span>Grab</span><span class="big">${h(it.sku || id)}</span><span>from the</span>${boxTag(it.box)}<span>box</span></div>` : ""}
@@ -923,7 +895,8 @@ function renderDetail() {
         ${fld(it, "sale.tracking", "Tracking number")}
         <div class="btns">${it.stage === "sold" ? `<button class="btn primary" data-act="shipped">Mark shipped</button>` : ""}${it.stage === "shipped" ? `<button class="btn primary" data-act="complete">Mark complete</button>` : ""}<button class="btn ghost" data-act="unsell">Undo sale</button></div>
         ${Object.keys(PLAT).filter(p => p !== it.sale.platform && (pl[p] || {}).status === "listed").length ? `<div class="banner">Still listed on ${Object.keys(PLAT).filter(p => p !== it.sale.platform && (pl[p] || {}).status === "listed").map(p => PLAT[p]).join(", ")}. Remove those listings now so you don't double-sell.</div>` : ""}`
-      : `<div class="grid3"><label class="f">Sold on<select id="sPlat">${Object.entries(PLAT).map(([k, n]) => `<option value="${k}">${n}</option>`).join("")}<option value="fblocal">FB local pickup</option></select></label><label class="f">Sale price $<input type="number" inputmode="decimal" step="0.01" id="sPrice"></label><label class="f">Buyer paid ship $<input type="number" inputmode="decimal" step="0.01" id="sShip"></label></div>
+      : `<div class="grid2"><label class="f">Sold on<select id="sPlat">${PLAT4.map(([k, n]) => `<option value="${k}" ${(it.listOn || "ebay") === k ? "selected" : ""}>${n}</option>`).join("")}</select></label><label class="f">Sold for $<input type="number" inputmode="decimal" step="0.01" id="sPrice"></label>
+        <label class="f ship-only" ${it.listOn === "fblocal" ? "hidden" : ""}>Buyer paid shipping $<input type="number" inputmode="decimal" step="0.01" id="sShip" placeholder="0"></label><label class="f ship-only" ${it.listOn === "fblocal" ? "hidden" : ""}>Label cost $<input type="number" inputmode="decimal" step="0.01" id="sLabel" value="${h(it.labelCost ?? "")}" placeholder="${h(shipPlan(it).cost ?? "")}"></label></div>
         <button class="btn primary" data-act="sold">Mark sold</button>`}
     </section>
 
@@ -931,35 +904,24 @@ function renderDetail() {
   </div></div>`;
   $(".sheet-body", sheet).scrollTop = y;
 }
-function refreshComputed() {
-  const it = S.items[S.open]; if (!it) return;
-  const m = $("#moneySec"); if (m) m.innerHTML = moneySection(it);
-  const s = $("#shipSec"); if (s) s.innerHTML = shipSection(it);
-}
-
 /* ---------- actions ---------- */
 async function generateListing() {
-  const id = S.open; const it = S.items[id]; const st = $("#genStatus"); const btn = $('[data-act="gen"]');
+  const id = S.open; const it = S.items[id]; const on = it.listOn; const st = $("#genStatus"); const btn = $('[data-act="gen"]');
+  if (!on) { toast("Pick where it's listing first."); return; }
   const nPhotos = Math.min((it.photos || []).length, 6);
   btn.disabled = true; st.innerHTML = `<div class="thinking"><span class="spin"></span>Waiting for Claude's reply…</div>`;
   try {
-    const r = await ai({ prompt: listingPrompt(it, id, nPhotos), json: true, attach: nPhotos });
+    const r = await ai({ prompt: listingPrompt(it, id, nPhotos, on), json: true, attach: nPhotos });
     if (!r || typeof r !== "object") throw { code: "invalid_json" };
     // Undo restores the whole item: merging the old fields back would keep anything the listing added.
     const prev = JSON.parse(JSON.stringify(it));
-    const e = r.ebay || {}, d = r.depop || {}, f = r.fb || {}, pr = r.pricing || {};
-    const patch = {
-      listing: { ebayTitle: String(e.title || "").slice(0, 120), ebayDesc: e.description || "", ebaySpecifics: Array.isArray(e.itemSpecifics) ? e.itemSpecifics.filter(x => Array.isArray(x) && x.length >= 2).map(x => [String(x[0]), String(x[1])]) : Object.entries(e.itemSpecifics || {}).map(([k, v]) => [k, String(v)]),
-        category: e.categoryHint || "", offerAccept: num(e.bestOfferAccept), offerDecline: num(e.bestOfferDecline),
-        depopDesc: d.description || "", depopKeywords: Array.isArray(d.keywords) ? d.keywords.join(", ") : (d.keywords || ""),
-        fbTitle: f.title || "", fbDesc: f.description || "", compSearch: pr.compSearch || "" },
-      prices: { ebay: num(e.price), depop: num(d.price), fb: num(f.price) }, floor: num(pr.floor),
-      ai: { identified: r.identified || "", verify: Array.isArray(r.verify) ? r.verify.map(String) : [], platformFit: r.platformFit || {}, pricing: pr, shipping: r.shipping || null, photoTips: Array.isArray(r.photoTips) ? r.photoTips.map(String) : [], generatedAt: Date.now() }
-    };
+    const p = LIST_PLAT[on];
+    const listing = p === "ebay" ? { ebayTitle: String(r.title || "").slice(0, 120), ebayDesc: r.description || "", category: r.categoryHint || "",
+        ebaySpecifics: Array.isArray(r.itemSpecifics) ? r.itemSpecifics.filter(x => Array.isArray(x) && x.length >= 2).map(x => [String(x[0]), String(x[1])]) : Object.entries(r.itemSpecifics || {}).map(([k, v]) => [k, String(v)]) }
+      : p === "depop" ? { depopDesc: r.description || "", depopKeywords: Array.isArray(r.keywords) ? r.keywords.join(", ") : (r.keywords || "") }
+      : { fbTitle: r.title || "", fbDesc: r.description || "" };
+    const patch = { listing, ai: { identified: r.identified || "", verify: Array.isArray(r.verify) ? r.verify.map(String) : [], photoTips: Array.isArray(r.photoTips) ? r.photoTips.map(String) : [], generatedAt: Date.now() } };
     if (STAGE_IDX[it.stage || "intake"] < 2) patch.stage = "drafted";
-    const fit = r.platformFit || {}; const plat = {};
-    for (const p of Object.keys(PLAT)) if (!(it.plat && it.plat[p] && it.plat[p].status && it.plat[p].status !== "none") && fit[p] && fit[p].fit !== "skip") plat[p] = { status: "planned" };
-    if (Object.keys(plat).length) patch.plat = plat;
     await saveItem(id, patch);
     toast("Listing written", { label: "Undo", fn: () => saveItem(id, prev, { create: true }) });
     if (st) st.innerHTML = "";
@@ -1010,10 +972,11 @@ async function markSold() {
   const id = S.open; const it = S.items[id]; let p = $("#sPlat").value; const local = p === "fblocal"; if (local) p = "fb";
   const price = num($("#sPrice").value); if (price == null) { toast("Enter the sale price."); return; }
   const shipIn = num($("#sShip").value);
-  const sp = shipPlan(it); const label = local ? 0 : (num(it.labelCost) ?? sp.cost ?? 0);
+  const labelIn = num($("#sLabel").value);
+  const sp = shipPlan(it); const label = local ? 0 : (labelIn ?? num(it.labelCost) ?? sp.cost ?? 0);
   const r = netFor(p, { price, ship: local ? 0 : (shipIn ?? (it.freeShip ? 0 : label)), label, pkg: local ? 0 : pkgCost(sp.pkg), cost: num(it.cost) || 0, local });
   const r2 = x => Math.round(x * 100) / 100;
-  await saveItem(id, { stage: local ? "complete" : "sold", completedAt: local ? Date.now() : null, sale: { platform: p, local, price, ship: r.ship, gross: r2(r.gross), fees: r2(r.fees), label: r2(r.label), pkg: r2(r.pkg), cost: r2(r.cost), net: r2(r.net), date: Date.now() }, plat: { [p]: { status: "ended" } } });
+  await saveItem(id, { stage: local ? "complete" : "sold", completedAt: local ? Date.now() : null, ...(labelIn != null && !local ? { labelCost: labelIn } : {}), sale: { platform: p, local, price, ship: r.ship, gross: r2(r.gross), fees: r2(r.fees), label: r2(r.label), pkg: r2(r.pkg), cost: r2(r.cost), net: r2(r.net), date: Date.now() }, plat: { [p]: { status: "ended" } } });
   toast("Marked sold. Net " + money(r.net));
 }
 
@@ -1124,6 +1087,13 @@ document.addEventListener("change", async e => {
   if (t.dataset.bsel) { S.bundle.sel[t.dataset.bsel] = t.checked; render(); return; }
   if (t.dataset.ship) { S.shipCalc[t.dataset.ship] = t.type === "checkbox" ? t.checked : t.type === "number" ? num(t.value) : t.value; render(); return; }
   if (t.dataset.filt) { S.filter[t.dataset.filt] = t.value; const l = $("#itemList"); if (l) l.innerHTML = itemListHTML(); return; }
+  if (t.id === "sPlat") { $$(".ship-only").forEach(l => l.hidden = t.value === "fblocal"); return; }
+  if (t.dataset.live && S.open) {
+    const p = t.dataset.live, it = S.items[S.open], x = (it.plat || {})[p] || {};
+    const patch = { plat: { [p]: t.checked ? { status: "listed", listedAt: x.listedAt || Date.now() } : { status: "ended" } } };
+    if (t.checked && STAGE_IDX[it.stage || "intake"] < 3) patch.stage = "listed";
+    await saveItem(S.open, patch); detailSig = ""; renderSoon(); return;
+  }
   if (t.dataset.f && S.open) {
     const p = t.dataset.f; const it = S.items[S.open];
     let v = t.type === "checkbox" ? t.checked : t.dataset.num ? num(t.value) : t.value;
@@ -1132,16 +1102,16 @@ document.addEventListener("change", async e => {
     if (p === "stage" && v === "complete") patch.completedAt = Date.now();
     if (/^plat\.\w+\.status$/.test(p)) { const pf = p.split(".")[1];
       if (v === "listed") { patch.plat[pf].listedAt = (it.plat && it.plat[pf] && it.plat[pf].listedAt) || Date.now(); if (STAGE_IDX[it.stage || "intake"] < 3) patch.stage = "listed"; } }
-    const structural = p === "stage" || p === "box" || /status$/.test(p);
+    const structural = p === "stage" || p === "box" || p === "listOn" || /status$/.test(p);
     await saveItem(S.open, patch, { quiet: !structural });
-    if (structural) { detailSig = ""; t.blur(); renderSoon(); } else refreshComputed();
+    if (structural) { detailSig = ""; t.blur(); renderSoon(); }
   }
 });
 document.addEventListener("input", e => {
   const t = e.target;
   if (t.dataset.off) { updateOffer(t); return; }
   if (t.dataset.fee === "item") { const v = feeState(), it = S.items[t.value]; v.item = t.value;
-    if (it) { const sp = shipPlan(it); const oz = sp.packedOz ?? num(it.weightOz); Object.assign(v, { price: num((it.prices || {})[v.plat === "fblocal" ? "fb" : v.plat]) ?? mainPrice(it) ?? "", cost: num(it.cost) ?? "", pkg: sp.pkg, shipMode: it.freeShip ? "free" : "buyer" }); if (oz != null) v.weight = (WEIGHTS.find(([m]) => oz <= +m) || WEIGHTS[WEIGHTS.length - 1])[0]; }
+    if (it) { const sp = shipPlan(it); const oz = sp.packedOz ?? num(it.weightOz); Object.assign(v, { price: listPrice(it, LIST_PLAT[v.plat]) ?? "", cost: num(it.cost) ?? "", pkg: sp.pkg, shipMode: it.freeShip ? "free" : "buyer" }); if (oz != null) v.weight = (WEIGHTS.find(([m]) => oz <= +m) || WEIGHTS[WEIGHTS.length - 1])[0]; }
     t.blur(); render(); }
   if (t.dataset.fee && t.dataset.fee !== "item") { const v = feeState(); v[t.dataset.fee] = t.value; if (t.tagName === "SELECT") { t.blur(); render(); } else $("#feeOut").innerHTML = feeOut(v); }
   if (t.dataset.tgt) { S.target[t.dataset.tgt] = t.value; if (t.tagName === "SELECT") { t.blur(); render(); } else $("#tgtOut").innerHTML = targetOut(S.target); }
