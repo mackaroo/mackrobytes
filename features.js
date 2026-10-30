@@ -155,7 +155,6 @@ document.addEventListener("toggle", e => { const d = e.target; if (d.dataset && 
 // Dropdowns that replaced rows of chips.
 document.addEventListener("change", async e => {
   const t = e.target, k = t.dataset && t.dataset.pick; if (!k) return;
-  if (k === "tool") { S.tools = t.value; render(); }
   if (k === "period") { S.period = t.value; render(); }
   if (k === "expType") { S.exp.type = t.value; render(); }
   if (k === "wsSize" && SORT.pending) { SORT.pending.size = t.value; renderSorter(); }

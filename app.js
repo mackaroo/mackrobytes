@@ -194,7 +194,6 @@ function netFor(p, { price, ship = 0, label = 0, pkg = 0, cost = 0, local = fals
 }
 // The four payout columns: eBay, Depop, FB shipped, FB local pickup.
 const FEE_COLS = [["ebay", false], ["depop", false], ["fb", false], ["fb", true]];
-const feeCalcRows = v => FEE_COLS.map(([p, local]) => ({ p, local, r: netFor(p, { price: num(v.price), ship: num(v.ship), label: num(v.label), pkg: num(v.pkg), cost: num(v.cost), local }) }));
 // The price shown in lists: eBay first, then Depop, then FB.
 const mainPrice = it => num((it.prices || {}).ebay) ?? num((it.prices || {}).depop) ?? num((it.prices || {}).fb);
 function itemNet(it, p, local) {
@@ -458,8 +457,8 @@ const VIEWS = {
       <button class="btn primary" data-act="addBulk">Import list</button>`)}`;
   },
   tools() {
-    const t = S.tools; const tabs = [["fees", "Fees"], ["offer", "Offers"], ["messages", "Messages"], ["bundle", "Bundles"], ["ship", "Shipping"], ["boost", "Grow"], ["ask", "Ask Claude"]];
-    return `<div class="card-h"><h1>Tools</h1><select class="sp pick-sel" data-pick="tool" aria-label="Tool">${tabs.map(([k, n]) => `<option value="${k}" ${t === k ? "selected" : ""}>${n}</option>`).join("")}</select></div>` + TOOLS[t]();
+    const t = TOOLS[S.tools] ? S.tools : "fees";
+    return `<h1>Tools</h1><div class="tool-grid">${TOOL_LIST.map(([k, n, c]) => `<button class="tool-tile" style="--hue:var(--${c})" data-act="tool" data-v="${k}" ${t === k ? 'aria-current="page"' : ""}><i></i>${n}</button>`).join("")}</div>` + TOOLS[t]();
   },
   profit() {
     const [a, b] = periodRange(S.period); const sales = salesIn(+a, +b); const ex = expensesIn(+a, +b);
@@ -504,16 +503,16 @@ const VIEWS = {
     return `<h1>Settings</h1>
     ${fold("sShop", "Shop", `<div class="grid2">${f("ownerName", "First name")}${f("shopName", "Shop name")}${f("fbName", "FB name")}${f("zip", "Ship-from ZIP")}${f("city", "FB city")}${f("handlingDays", "Handling days", "number", "1")}${f("staleDays", "Stale after (days)", "number", "1")}</div>`)}
     ${fold("sLook", "Look", `
-      <label class="f">Theme<select data-set="theme"><option value="auto" ${!["light", "dark"].includes(s.theme) ? "selected" : ""}>Match my device</option><option value="light" ${s.theme === "light" ? "selected" : ""}>Daylight lavender</option><option value="dark" ${s.theme === "dark" ? "selected" : ""}>Night sky</option></select></label>`)}
+      <label class="f">Theme<select data-set="theme"><option value="auto" ${!["light", "dark"].includes(s.theme) ? "selected" : ""}>Match my device</option><option value="light" ${s.theme === "light" ? "selected" : ""}>Light</option><option value="dark" ${s.theme === "dark" ? "selected" : ""}>Dark</option></select></label>`)}
     ${fold("sGoals", "Goals & SKUs", `<div class="grid2">${f("weeklyGoal", "Listings per week", "number", "1")}${f("sellMin", "Donate if under $", "number", "1")}${f("skuPrefix", "SKU prefix")}${f("skuNext", "Next SKU #", "number", "1")}</div>
       <p class="small muted" style="margin:0">Next: ${h(s.skuPrefix || "MB")}${String(new Date().getFullYear() % 100)}-${String(num(s.skuNext) || 1).padStart(4, "0")}</p>`)}
     ${fold("sPhotos", "Photos", `
-      ${f("photoCleanupDays", "Delete photos N days after sale (0 = never)", "number", "1")}`)}
+      ${f("photoCleanupDays", "Delete photos after sale (days, 0 = never)", "number", "1")}`)}
     ${fold("sTax", "Taxes", `
       <div class="grid3">${f("mileRateH1", "Mileage $/mi", "number", "0.001")}${f("mileRateH2", "Rate after switch", "number", "0.001")}${f("mileSwitch", "Switch date")}</div>`)}
     ${fold("sFees", "Fees", `
-      <div class="eyebrow">eBay</div><div class="grid2">${f("ebayFvfPct", "Final value fee %", "number", "0.01")}${f("salesTaxPct", "Avg sales tax % (fee base)", "number", "0.1")}${f("buyTaxPct", "Tax added to what you paid %", "number", "0.1")}${f("ebayOrderFeeHigh", "Per-order fee (> $10)", "number", "0.01")}${f("ebayOrderFeeLow", "Per-order fee (≤ $10)", "number", "0.01")}${f("ebayAdPct", "Promoted listings %", "number", "0.1")}</div>
-      <div class="eyebrow">Depop</div><div class="grid2">${f("depopPct", "Payment processing %", "number", "0.01")}${f("depopFixed", "Processing fixed fee", "number", "0.01")}${f("depopBoostPct", "Boost fee % (0 if not boosting)", "number", "0.1")}</div>
+      <div class="eyebrow">eBay</div><div class="grid2">${f("ebayFvfPct", "Final value fee %", "number", "0.01")}${f("salesTaxPct", "Avg sales tax %", "number", "0.1")}${f("buyTaxPct", "Your purchase tax %", "number", "0.1")}${f("ebayOrderFeeHigh", "Per-order fee (> $10)", "number", "0.01")}${f("ebayOrderFeeLow", "Per-order fee (≤ $10)", "number", "0.01")}${f("ebayAdPct", "Promoted listings %", "number", "0.1")}</div>
+      <div class="eyebrow">Depop</div><div class="grid2">${f("depopPct", "Payment processing %", "number", "0.01")}${f("depopFixed", "Processing fixed fee", "number", "0.01")}${f("depopBoostPct", "Boost fee %", "number", "0.1")}</div>
       <div class="eyebrow">FB Marketplace (shipped orders)</div><div class="grid2">${f("fbShipPct", "Selling fee %", "number", "0.1")}${f("fbShipMin", "Minimum fee", "number", "0.01")}</div>`)}
     ${fold("sPkg", "Packaging costs", `<div class="grid2">${f("pkgEnvelope", "Envelope / toploader", "number", "0.01")}${f("pkgPoly", "Poly mailer", "number", "0.01")}${f("pkgBubble", "Bubble mailer", "number", "0.01")}${f("pkgBox", "Box + padding", "number", "0.01")}</div>`)}
     ${fold("sBackup", "Backup", `
@@ -524,12 +523,36 @@ const VIEWS = {
 
 const TOOLS = {
   fees() {
-    const v = S.feeCalc || (S.feeCalc = { price: 25, ship: 6.25, label: 6.25, cost: 5, pkg: 0.4 });
-    const rows = feeCalcRows(v);
-    return `<section class="card"><h2>What you actually keep</h2>
-      <div class="grid3"><label class="f">Sale price<input type="number" inputmode="decimal" step="0.01" data-fee="price" value="${h(v.price)}"></label><label class="f">Buyer pays shipping<input type="number" inputmode="decimal" step="0.01" data-fee="ship" value="${h(v.ship)}"></label><label class="f">Your label cost<input type="number" inputmode="decimal" step="0.01" data-fee="label" value="${h(v.label)}"></label><label class="f">Packaging<input type="number" inputmode="decimal" step="0.01" data-fee="pkg" value="${h(v.pkg)}"></label><label class="f">Your cost for item<input type="number" inputmode="decimal" step="0.01" data-fee="cost" value="${h(v.cost)}"></label></div>
-      <div class="scroll-x" id="feeTable">${feeTable(rows)}</div>
-</section>`;
+    const v = feeState();
+    const items = Object.entries(S.items).filter(([, it]) => !it.sale).sort((a, b) => (a[1].name || "").localeCompare(b[1].name || ""));
+    return `<section class="card"><h2>Fee calculator</h2>
+      <div class="grid2">${platSelect("fee", v.plat)}<label class="f">Fill from item<select data-fee="item"><option value="">—</option>${items.map(([k, x]) => `<option value="${h(k)}" ${v.item === k ? "selected" : ""}>${h(x.name || x.sku || k)}</option>`).join("")}</select></label>
+        <label class="f">Sale price $<input type="number" inputmode="decimal" step="0.01" data-fee="price" value="${h(v.price)}" placeholder="0.00"></label><label class="f">You paid $<input type="number" inputmode="decimal" step="0.01" data-fee="cost" value="${h(v.cost)}" placeholder="0.00"></label>
+        ${v.plat === "fblocal" ? "" : `${shipModeSelect("fee", v.shipMode)}${weightSelect("fee", v.weight)}${pkgSelect("fee", v.pkg)}`}</div>
+      <div id="feeOut">${feeOut(v)}</div></section>`;
+  },
+  target() {
+    const v = S.target || (S.target = { plat: "ebay", want: "", cost: "", shipMode: "buyer", weight: "8", pkg: "bubble" });
+    return `<section class="card"><h2>Target price</h2>
+      <div class="grid2">${platSelect("tgt", v.plat)}<label class="f">I want to keep $<input type="number" inputmode="decimal" step="0.01" data-tgt="want" value="${h(v.want)}" placeholder="20"></label>
+        <label class="f">You paid $<input type="number" inputmode="decimal" step="0.01" data-tgt="cost" value="${h(v.cost)}" placeholder="0.00"></label>
+        ${v.plat === "fblocal" ? "" : `${shipModeSelect("tgt", v.shipMode)}${weightSelect("tgt", v.weight)}${pkgSelect("tgt", v.pkg)}`}</div>
+      <div id="tgtOut">${targetOut(v)}</div></section>`;
+  },
+  title() {
+    const v = S.titleB || (S.titleB = { brand: "", what: "", model: "", detail: "", cond: "", extra: "" });
+    const f = (k, n, ph) => `<label class="f">${n}<input type="text" data-ttl="${k}" value="${h(v[k])}" placeholder="${ph}"></label>`;
+    return `<section class="card"><h2>Title builder</h2>
+      <div class="grid2">${f("brand", "Brand", "Nintendo")}${f("what", "What it is", "Game Boy Color")}${f("model", "Model / number", "CGB-001")}${f("detail", "Color / size", "Teal")}
+        <label class="f">Condition<select data-ttl="cond"><option value="">—</option>${["New", "NWT", "Sealed", "Like New", "Tested Works", "Vintage", "For Parts"].map(c => `<option ${v.cond === c ? "selected" : ""}>${c}</option>`).join("")}</select></label>${f("extra", "Extra keywords", "Bundle, Rare")}</div>
+      <div id="ttlOut">${titleOut(v)}</div></section>`;
+  },
+  drops() {
+    const v = S.drops || (S.drops = { price: "", floor: "", pct: "10", every: "7" });
+    return `<section class="card"><h2>Price drop plan</h2>
+      <div class="grid2"><label class="f">Listed at $<input type="number" inputmode="decimal" step="0.01" data-drp="price" value="${h(v.price)}" placeholder="40"></label><label class="f">Lowest I'll go $<input type="number" inputmode="decimal" step="0.01" data-drp="floor" value="${h(v.floor)}" placeholder="25"></label>
+        <label class="f">Drop by<select data-drp="pct">${["5", "10", "15", "20"].map(x => `<option value="${x}" ${v.pct === x ? "selected" : ""}>${x}%</option>`).join("")}</select></label><label class="f">Every<select data-drp="every">${[["3", "3 days"], ["7", "Week"], ["14", "2 weeks"]].map(([x, n]) => `<option value="${x}" ${v.every === x ? "selected" : ""}>${n}</option>`).join("")}</select></label></div>
+      <div id="drpOut">${dropsOut(v)}</div></section>`;
   },
   offer() {
     return `<section class="card"><h2>Offer helper</h2>${offerBox(null, "t")}</section>`;
@@ -570,7 +593,7 @@ const TOOLS = {
       ${out}
       <div class="list">${cand.length ? cand.map(([id, it]) => `<label class="check" style="padding:6px 0;border-top:1px solid var(--line)"><input type="checkbox" data-bsel="${h(id)}" ${B.sel[id] ? "checked" : ""}><span style="min-width:0;flex:1">${h(it.name || id)} <span class="sku">${h(it.sku || id)}</span></span><span class="mono small">${money(num((it.prices || {})[B.plat]))}</span></label>`).join("") : `<p class="muted small">No unsold items yet.</p>`}</div>
     </section>
-    <section class="card flat"><h2>Tips</h2><details class="tips" open><summary>eBay</summary><ul><li>Set up combined shipping discounts in your shipping preferences so multi-item buyers pay for one shipment.</li><li>Volume pricing (buy 2, save X%) is under Seller Hub, Marketing. It works best on related items, like accessories for the same console.</li><li>Accept bundle offers through Best Offer or a custom invoice. Never take payment off eBay.</li></ul></details>
+    <section class="card flat"><h2>Tips</h2><details class="tips"><summary>eBay</summary><ul><li>Set up combined shipping discounts in your shipping preferences so multi-item buyers pay for one shipment.</li><li>Volume pricing (buy 2, save X%) is under Seller Hub, Marketing. It works best on related items, like accessories for the same console.</li><li>Accept bundle offers through Best Offer or a custom invoice. Never take payment off eBay.</li></ul></details>
       <details class="tips"><summary>Depop</summary><ul><li>Turn on bundle discounts in your shop settings. Buyers bundle items from your shop, and the discount applies automatically.</li><li>A tiered discount (say 10% for 2, 15% for 3+) gets buyers browsing your whole shop. Depop rewards that engagement.</li></ul></details>
       <details class="tips"><summary>FB Marketplace</summary><ul><li>No bundle tool, so put "bundle deals available, message me" in descriptions and quote bundle prices in Messenger.</li><li>For local pickup a bundle costs you nothing extra, so you can discount a little deeper.</li></ul></details></section>`;
   },
@@ -584,7 +607,7 @@ const TOOLS = {
       ${sp.notes.length ? `<ul class="small">${sp.notes.map(n => `<li>${h(n)}</li>`).join("")}</ul>` : ""}
 </section>
     <section class="card flat"><h2>Tips</h2>
-      <details class="tips" open><summary>Pay less for labels</summary><ul>
+      <details class="tips"><summary>Pay less for labels</summary><ul>
         <li>Always buy labels inside eBay, Depop or FB. They get commercial rates, which beat the post office counter.</li>
         <li>Up to 15.99 oz, Ground Advantage is priced by the ounce. Weigh after packing and trim excess packaging when you're near a break (4, 8, 12, 15.99 oz).</li>
         <li>Trading cards up to 3 oz: eBay Standard Envelope costs well under $1 with tracking. Use a toploader in a plain #10 envelope.</li>
@@ -606,7 +629,7 @@ const TOOLS = {
     return `<section class="card"><h2>Boost plan</h2>
       <button class="btn primary" data-act="boostAI" ${Object.keys(S.items).length ? "" : "disabled"}>Make my boost plan</button><div id="boostOut" class="ai-out"></div></section>
     <section class="card flat"><h2>Playbook</h2>
-      <details class="tips" open><summary>eBay</summary><ul><li>List a little every day. New listings get a visibility bump, and steady activity helps your whole store.</li><li>Fill in every item specific. Search filters depend on them.</li><li>Use 8–12+ photos (up to 24 are free) on a plain background, starting with a sharp square cover photo.</li><li>Turn on Best Offer and send offers to watchers after 2–3 days.</li><li>Ship in 1 business day and offer 30-day returns for the best placement and buyer trust.</li><li>For competitive items, try Promoted Listings General at a low 2–4% rate. Set that rate in Settings so the net math stays honest.</li><li>After 60–90 days with no sale, end it and Sell Similar with fresh photos and a sharper title.</li></ul></details>
+      <details class="tips"><summary>eBay</summary><ul><li>List a little every day. New listings get a visibility bump, and steady activity helps your whole store.</li><li>Fill in every item specific. Search filters depend on them.</li><li>Use 8–12+ photos (up to 24 are free) on a plain background, starting with a sharp square cover photo.</li><li>Turn on Best Offer and send offers to watchers after 2–3 days.</li><li>Ship in 1 business day and offer 30-day returns for the best placement and buyer trust.</li><li>For competitive items, try Promoted Listings General at a low 2–4% rate. Set that rate in Settings so the net math stays honest.</li><li>After 60–90 days with no sale, end it and Sell Similar with fresh photos and a sharper title.</li></ul></details>
       <details class="tips"><summary>Depop</summary><ul><li>Post at peak times (evenings and Sunday) and refresh older listings so they move back up.</li><li>Use square photos with good light; a lifestyle or flat-lay cover shot stands out in the feed.</li><li>Fill every attribute (brand, size, color, condition, style). Depop search relies on them.</li><li>Send offers to people who like your items, and follow and engage with buyers in your niche.</li><li>Keep your shop consistent: same background and lighting so it looks like a brand.</li></ul></details>
       <details class="tips"><summary>FB Marketplace</summary><ul><li>Reply fast. FB shows response time, and buyers move on quickly.</li><li>Renew listings when FB offers it, and relist stale items with new photos.</li><li>Price slightly above your floor. Local buyers expect to haggle.</li><li>Use specific keywords in the title (brand, model, size). FB search is literal.</li><li>Meet in public spots; a police station safe-exchange zone works well.</li></ul></details>
       <details class="tips"><summary>Photos that convert (and never look AI-edited)</summary><ul><li>Shoot near a window in daylight, or under two matching lamps. Don't mix light colors.</li><li>Use the 1x main lens on your 15 Pro and tap to focus on labels and flaws.</li><li>Only global fixes: brightness, white balance, contrast, straightening, cropping. Never remove flaws or change the item. Platforms require photos to show the real item.</li><li>Include a scale shot and every flaw. Honest photos mean fewer returns and better reviews.</li></ul></details></section>`;
@@ -695,7 +718,7 @@ function offerCalc(it, plat, offer) {
 }
 function offerHTML(it, plat, offer, key) {
   if (!it) return `<p class="small muted">Add an item with a price to use this.</p>`;
-  if (offer == null) return `<p class="small muted">Type their offer to see what you'd keep and what to reply.</p>`;
+  if (offer == null) return `<p class="small muted">Enter their offer.</p>`;
   const r = offerCalc(it, plat, offer); if (r.err) return `<p class="small muted">${h(r.err)}</p>`;
   return `<div class="offer-res"><div class="verdict">${h(r.verdict)}</div><div class="small muted">${h(r.why)}</div>
     <table class="money"><tbody><tr><td>You keep at their offer</td><td class="${r.netOffer >= 0 ? "pos" : "neg"}">${money(r.netOffer)}</td></tr>${r.counter != null ? `<tr><td>You keep at ${money(r.counter)}</td><td class="pos">${money(r.netCounter)}</td></tr>` : ""}<tr><td>Your price · lowest</td><td>${money(r.list)} · ${money(r.floor)}</td></tr></tbody></table>
@@ -736,15 +759,59 @@ async function cleanupPhotos() {
   }
   if (n) toast("Cleared photos from " + n + " completed sale(s) to free up space");
 }
-function feeTable(rows) {
-  const name = r => r.p === "fb" ? (r.local ? "FB local" : "FB shipped") : PLAT[r.p];
-  return `<table class="money"><thead><tr><th></th>${rows.map(r => `<th>${name(r)}</th>`).join("")}</tr></thead><tbody>
-    <tr><td>Buyer pays</td>${rows.map(r => `<td>${money(r.r.gross)}</td>`).join("")}</tr>
-    <tr><td>Platform fees</td>${rows.map(r => `<td>−${money(r.r.fees).replace("−", "")}</td>`).join("")}</tr>
-    <tr><td>Label</td>${rows.map(r => `<td>−${money(r.r.label)}</td>`).join("")}</tr>
-    <tr><td>Packaging</td>${rows.map(r => `<td>−${money(r.r.pkg)}</td>`).join("")}</tr>
-    <tr><td>Item cost</td>${rows.map(r => `<td>−${money(r.r.cost)}</td>`).join("")}</tr>
-    <tr class="net"><td>You keep</td>${rows.map(r => `<td class="${r.r.net >= 0 ? "pos" : "neg"}">${money(r.r.net)}</td>`).join("")}</tr></tbody></table>`;
+
+// Tools tab tiles: key, label, color.
+const TOOL_LIST = [["fees", "Fees", "c5"], ["target", "Target price", "c4"], ["offer", "Offers", "c2"], ["drops", "Price drops", "c1"], ["ship", "Shipping", "c6"], ["title", "Titles", "c7"], ["bundle", "Bundles", "c3"], ["messages", "Messages", "c5"], ["boost", "Grow", "c4"], ["ask", "Ask Claude", "c6"]];
+const PLAT4 = [["ebay", "eBay"], ["depop", "Depop"], ["fb", "FB shipped"], ["fblocal", "FB local pickup"]];
+const WEIGHTS = [["4", "Under 4 oz"], ["8", "4–8 oz"], ["12", "8–12 oz"], ["15.99", "12–16 oz"], ["32", "1–2 lb"], ["48", "2–3 lb"], ["64", "3–4 lb"], ["80", "4–5 lb"], ["160", "5–10 lb"], ["320", "10–20 lb"]];
+const sel = (attr, key, label, opts, cur) => `<label class="f">${label}<select data-${attr}="${key}">${opts.map(([k, n]) => `<option value="${k}" ${String(cur) === k ? "selected" : ""}>${n}</option>`).join("")}</select></label>`;
+const platSelect = (a, cur) => sel(a, "plat", "Platform", PLAT4, cur);
+const shipModeSelect = (a, cur) => sel(a, "shipMode", "Shipping", [["buyer", "Buyer pays"], ["free", "Free (I pay)"]], cur);
+const weightSelect = (a, cur) => sel(a, "weight", "Packed weight", WEIGHTS, cur);
+const pkgSelect = (a, cur) => sel(a, "pkg", "Package", Object.entries(PKG_NAME), cur);
+function feeState() { return S.feeCalc && S.feeCalc.plat ? S.feeCalc : (S.feeCalc = { plat: "ebay", item: "", price: "", cost: "", shipMode: "buyer", weight: "8", pkg: "bubble" }); }
+// Net for one tool setup at a given price. Label = Ground Advantage for the weight bracket (eBay Standard Envelope for light envelopes on eBay).
+function toolNet(v, price, plat = v.plat) {
+  const local = plat === "fblocal"; const p = local ? "fb" : plat;
+  const oz = num(v.weight) || 8;
+  const label = local ? 0 : p === "ebay" && v.pkg === "envelope" && oz <= 4 ? 0.8 : gaPrice(oz);
+  return netFor(p, { price, ship: v.shipMode === "free" ? 0 : label, label, pkg: local ? 0 : pkgCost(v.pkg), cost: num(v.cost) || 0, local });
+}
+const pctOf = (a, b) => b ? Math.round(a / b * 100) + "%" : "—";
+function feeOut(v) {
+  const price = num(v.price);
+  if (!price) return `<p class="tool-hint">Enter a sale price to see what you keep.</p>`;
+  const r = toolNet(v, price);
+  const row = (n, x, neg = true) => `<div class="kv"><span>${n}</span><b>${neg && x ? "−" : ""}${money(x)}</b></div>`;
+  const all = PLAT4.map(([k, n]) => ({ k, n, net: toolNet(v, price, k).net }));
+  const best = all.reduce((a, b) => b.net > a.net ? b : a);
+  return `<div class="hero ${r.net >= 0 ? "pos" : "neg"}"><span>You keep</span><b>${money(r.net)}</b><small>${pctOf(r.net, r.gross)} of what the buyer pays</small></div>
+    <div class="kvs">${row("Buyer pays", r.gross, false)}${row("Fees", r.fees)}${r.label ? row("Label", r.label) : ""}${r.pkg ? row("Packaging", r.pkg) : ""}${r.cost ? row("You paid", r.cost) : ""}</div>
+    <div class="eyebrow">Same sale elsewhere</div>
+    <div class="cmp">${all.map(x => `<button class="cmp-c ${x.k === v.plat ? "on" : ""}" data-act="feePlat" data-v="${x.k}"><span>${x.n}</span><b class="${x.net >= 0 ? "pos" : "neg"}">${money(x.net)}</b>${x.k === best.k ? `<em>Best</em>` : ""}</button>`).join("")}</div>`;
+}
+// Smallest price (to the cent) that nets at least `want`.
+function priceFor(v, want) { let lo = 0, hi = Math.max(50, want * 4 + 50); for (let i = 0; i < 40; i++) { const m = (lo + hi) / 2; if (toolNet(v, m).net >= want) hi = m; else lo = m; } return Math.ceil(hi * 100 - 1e-6) / 100; }
+function targetOut(v) {
+  const want = num(v.want);
+  if (want == null) return `<p class="tool-hint">Enter how much you want to keep.</p>`;
+  const price = priceFor(v, want); const nice = Math.ceil(price) - 0.01 >= price ? Math.ceil(price) - 0.01 : Math.ceil(price) + 0.99;
+  const r = toolNet(v, price);
+  return `<div class="hero pos"><span>List it at</span><b>${money(nice)}</b><small>at least ${money(price)} · fees ${money(r.fees)}</small></div>
+    <div class="cmp">${PLAT4.map(([k, n]) => `<div class="cmp-c ${k === v.plat ? "on" : ""}"><span>${n}</span><b>${money(priceFor({ ...v, plat: k }, want))}</b></div>`).join("")}</div>`;
+}
+function titleOut(v) {
+  const t = [v.brand, v.what, v.model, v.detail, v.cond, v.extra].map(x => String(x || "").trim()).filter(Boolean).join(" ").replace(/\s+/g, " ");
+  if (!t) return `<p class="tool-hint">Fill in a few boxes to build a title.</p>`;
+  return `<div class="title-out"><p id="ttlText">${h(t)}</p><div class="btns"><span class="count ${t.length > 80 ? "over" : ""}">${t.length}/80 eBay</span><button class="btn sm primary sp" data-act="copy" data-from="ttlText">Copy</button></div></div>`;
+}
+function dropsOut(v) {
+  const p0 = num(v.price), fl = num(v.floor), pct = num(v.pct) || 10, every = num(v.every) || 7;
+  if (!p0 || fl == null) return `<p class="tool-hint">Enter your price and your lowest price.</p>`;
+  if (fl >= p0) return `<p class="tool-hint">Your lowest price is already at or above the listed price.</p>`;
+  const steps = []; let p = p0, d = new Date();
+  while (steps.length < 12) { p = Math.max(fl, niceRound(p * (1 - pct / 100))); d = new Date(d.getTime() + every * 86400000); steps.push([d, p]); if (p <= fl) break; }
+  return `<div class="kvs">${steps.map(([d, p], i) => `<div class="kv"><span>${d.toLocaleDateString(undefined, { month: "short", day: "numeric" })}</span><b>${money(p)}${p <= fl ? ` <em class="tag">floor</em>` : ""}</b></div>`).join("")}</div>`;
 }
 
 /* ---------- item detail ---------- */
@@ -763,7 +830,8 @@ function copyField(it, p, label, opts = {}) {
 }
 function moneySection(it) {
   const rows = FEE_COLS.filter(([p]) => num((it.prices || {})[p]) != null).map(([p, local]) => ({ p, local, r: itemNet(it, p, local) }));
-  return rows.length ? `<div class="scroll-x">${feeTable(rows)}</div>` : `<p class="small muted">Set a price below to see your payout on each platform.</p>`;
+  const name = r => r.p === "fb" ? (r.local ? "FB local" : "FB shipped") : PLAT[r.p];
+  return rows.length ? `<div class="cmp">${rows.map(r => `<div class="cmp-c"><span>${name(r)}</span><b class="${r.r.net >= 0 ? "pos" : "neg"}">${money(r.r.net)}</b><span>fees ${money(r.r.fees)}</span></div>`).join("")}</div>` : `<p class="small muted">Add a price to see what you keep.</p>`;
 }
 function shipSection(it) {
   const sp = shipPlan(it);
@@ -824,7 +892,7 @@ function renderDetail() {
     ${fold("dPrices", "Prices", `
       <div class="pricegrid">${[["prices.ebay", "eBay"], ["prices.depop", "Depop"], ["prices.fb", "FB"], ["floor", "Floor"]].map(([p, n]) => `<div class="pricebox"><div class="card-h"><label class="eyebrow" for="${fid(p)}">${n}</label><button class="btn sm ghost sp" data-act="copy" data-from="${fid(p)}" style="min-height:24px;padding:2px 6px">Copy</button></div><input type="number" inputmode="decimal" step="0.01" id="${fid(p)}" data-f="${p}" data-num="1" value="${h(getPath(it, p) ?? "")}"></div>`).join("")}</div>
       ${L.offerAccept || L.offerDecline ? `<p class="small muted">eBay Best Offer: auto-accept at <span class="mono">${money(num(L.offerAccept))}</span>, auto-decline below <span class="mono">${money(num(L.offerDecline))}</span>.</p>` : ""}
-      <div class="eyebrow">What you actually keep</div><div id="moneySec">${moneySection(it)}</div>
+      <div class="eyebrow">You keep</div><div id="moneySec">${moneySection(it)}</div>
       <div class="grid3">${fld(it, "shipCharge", "Buyer pays shipping $", { num: 1, ph: "= label" })}${fld(it, "labelCost", "Actual label $", { num: 1, ph: "estimate" })}<label class="check" style="align-self:end;padding-bottom:10px"><input type="checkbox" data-f="freeShip" ${it.freeShip ? "checked" : ""}> Free shipping</label></div>`, { open: true })}
 
     ${STAGE_IDX[it.stage || "intake"] <= 3 ? fold("dOffer", "Offer helper", offerBox(id, "d")) : ""}
@@ -955,6 +1023,8 @@ document.addEventListener("click", async e => {
     case "open": openDetail(t.dataset.id); break;
     case "close": closeDetail(); break;
     case "stagejump": S.filter.stage = v; S.filter.box = "all"; S.filter.bin = "all"; S.filter.q = ""; goTab("items", S.tab === "items" ? 0 : 1); break;
+    case "tool": S.tools = v; document.activeElement.blur(); render(); break;
+    case "feePlat": feeState().plat = v; document.activeElement.blur(); render(); break;
     case "copy": { const el = document.getElementById(t.dataset.from); const txt = el ? (el.value ?? el.textContent) : ""; if (!String(txt).trim()) { toast("Nothing to copy yet."); break; } copyText(String(txt), t); break; }
     case "addOne": {
       const sku = $("#aSku").value.trim(); if (!sku) { toast("Enter the SKU."); break; }
@@ -1068,7 +1138,13 @@ document.addEventListener("change", async e => {
 document.addEventListener("input", e => {
   const t = e.target;
   if (t.dataset.off) { updateOffer(t); return; }
-  if (t.dataset.fee) { S.feeCalc[t.dataset.fee] = t.value; $("#feeTable").innerHTML = feeTable(feeCalcRows(S.feeCalc)); }
+  if (t.dataset.fee === "item") { const v = feeState(), it = S.items[t.value]; v.item = t.value;
+    if (it) { const sp = shipPlan(it); const oz = sp.packedOz ?? num(it.weightOz); Object.assign(v, { price: num((it.prices || {})[v.plat === "fblocal" ? "fb" : v.plat]) ?? mainPrice(it) ?? "", cost: num(it.cost) ?? "", pkg: sp.pkg, shipMode: it.freeShip ? "free" : "buyer" }); if (oz != null) v.weight = (WEIGHTS.find(([m]) => oz <= +m) || WEIGHTS[WEIGHTS.length - 1])[0]; }
+    t.blur(); render(); }
+  if (t.dataset.fee && t.dataset.fee !== "item") { const v = feeState(); v[t.dataset.fee] = t.value; if (t.tagName === "SELECT") { t.blur(); render(); } else $("#feeOut").innerHTML = feeOut(v); }
+  if (t.dataset.tgt) { S.target[t.dataset.tgt] = t.value; if (t.tagName === "SELECT") { t.blur(); render(); } else $("#tgtOut").innerHTML = targetOut(S.target); }
+  if (t.dataset.ttl) { S.titleB[t.dataset.ttl] = t.value; $("#ttlOut").innerHTML = titleOut(S.titleB); }
+  if (t.dataset.drp) { S.drops[t.dataset.drp] = t.value; $("#drpOut").innerHTML = dropsOut(S.drops); }
   if (t.dataset.actInput === "search") { S.filter.q = t.value; const l = $("#itemList"); if (l) l.innerHTML = itemListHTML(); }
   if (t.dataset.max) { const c = document.querySelector(`[data-count="${t.dataset.f}"]`); if (c) { c.textContent = t.value.length + "/" + t.dataset.max; c.classList.toggle("over", t.value.length > +t.dataset.max); } }
   if (t.classList.contains("edsl")) { ED.adj[t.dataset.k] = +t.value; t.nextElementSibling.textContent = t.value; edDrawSoon(); }
