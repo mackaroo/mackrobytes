@@ -556,8 +556,15 @@ document.addEventListener("click", async e => {
 
 /* ---------- home overview: every item in one list, plus the laptop sidebar ---------- */
 const HOME = { stage: "all", q: "" };
-const HOME_STAGES = [["all", "All"], ["tolist", "To list"], ["listed", "Listed"], ["sold", "To ship"], ["shipped", "Shipped"], ["complete", "Done"]];
-const inHomeStage = (it, k) => k === "all" || (k === "tolist" ? STAGE_IDX[it.stage || "intake"] <= 2 : (it.stage || "intake") === k);
+const HOME_STAGES = [["all", "All"], ["tolist", "To list"], ["listed", "Listed"], ["sold", "To ship"], ["shipped", "Shipped"], ["complete", "Done"], ["info", "Needs info"]];
+// Unsold items missing details: same checks as the "Needs attention" rules for photos, title, price and weight.
+function needsInfo(it) {
+  const stg = STAGE_IDX[it.stage || "intake"]; if (stg >= 4 || it.stage === "sold") return false;
+  const pr = it.prices || {};
+  return !it.name || (stg >= 1 && (it.photos || []).length < 3) || (stg >= 1 && num(it.weightOz) == null) ||
+    (stg >= 2 && !(it.listing && it.listing.ebayTitle)) || (stg >= 2 && !num(pr.ebay) && !num(pr.depop) && !num(pr.fb));
+}
+const inHomeStage = (it, k) => k === "all" || (k === "info" ? needsInfo(it) : k === "tolist" ? STAGE_IDX[it.stage || "intake"] <= 2 : (it.stage || "intake") === k);
 function homeListHTML() {
   const q = HOME.q.toLowerCase();
   const rows = Object.entries(S.items).filter(([id, it]) => inHomeStage(it, HOME.stage) &&

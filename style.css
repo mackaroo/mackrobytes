@@ -504,6 +504,7 @@ body::before, body::after { display: none; }
 .stat b { color: var(--hue); }
 .kpi:nth-child(6n+1) b { color: var(--c5); } .kpi:nth-child(6n+2) b { color: var(--c4); } .kpi:nth-child(6n+3) b { color: var(--c2); }
 .kpi:nth-child(6n+4) b { color: var(--c7); } .kpi:nth-child(6n+5) b { color: var(--c6); } .kpi:nth-child(6n) b { color: var(--c1); }
+.kpi:nth-child(5) b { color: var(--c3); } .kpis > .kpi:last-child:nth-child(3n+1) { grid-column: 1 / -1; }
 
 /* SKU: plain small text, no box */
 .sku { background: none; border: 0; padding: 0; color: var(--muted); font-weight: 600; font-size: 12.5px; letter-spacing: .02em; }
@@ -544,3 +545,6 @@ body::before, body::after { display: none; }
 .card, .modal-card, .tabs, .stat, .pricebox, .fitc, .offer-res, .bubble.ai, .kpi, .sheet-top, [class*="tile"] {
   backdrop-filter: none; -webkit-backdrop-filter: none; }
 .top.scrolled { backdrop-filter: none; -webkit-backdrop-filter: none; background: var(--sky-1); }
+
+/* 7 home KPI boxes: one row on laptop */
+@media (min-width: 1000px) { .kpis { grid-template-columns: repeat(7, minmax(0, 1fr)); } .kpis > .kpi:last-child { grid-column: auto; } }

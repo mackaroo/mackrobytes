@@ -416,7 +416,7 @@ const VIEWS = {
     ${LOCAL ? `<div class="banner">Preview mode · changes stay in this browser</div>` : ""}
     <div><div class="hello">Hello, ${h(s.ownerName || "Mackenzie")}.</div><div class="hello-sub">${new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}</div></div>
     <div class="kpis">
-      ${kpi(counts.intake + counts.photographed + counts.drafted, "To list", "homeStage", "tolist")}${kpi(counts.listed, "Listed", "homeStage", "listed")}${kpi(counts.sold, "To ship", "homeStage", "sold")}${kpi(undecided().length, "To sort", "tab", "sort")}
+      ${kpi(counts.intake + counts.photographed + counts.drafted, "To list", "homeStage", "tolist")}${kpi(counts.listed, "Listed", "homeStage", "listed")}${kpi(counts.sold, "To ship", "homeStage", "sold")}${kpi(undecided().length, "To sort", "tab", "sort")}${kpi(items.filter(([, it]) => needsInfo(it)).length, "Needs info", "homeStage", "info")}
       ${kpi(money(listedVal), "Listed value", "homeStage", "listed")}${kpi(money(netMonth), `Net this month · ${soldMonth.length} sold`, "tab", "profit")}
     </div>
     <div class="mob-only">${goalCardHTML()}</div>
