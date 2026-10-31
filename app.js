@@ -54,7 +54,9 @@ function deepMerge(a, b) {
   return o;
 }
 const skuId = s => { let id = String(s).trim().replace(/[^A-Za-z0-9_\-.~:@+]/g, "_").slice(0, 120); if (id === "." || id === "..") id = "_" + id; return id; };
-function parseBox(s) { s = String(s || "").toLowerCase(); if (s.startsWith("f")) return "fragile"; if (s.startsWith("h") || s.includes("tech")) return "hobby"; if (s.startsWith("s") || s.includes("collect")) return "soft"; const c = Object.entries(S.settings.boxes || {}).find(([, n]) => n.toLowerCase().startsWith(s)); return c ? c[0] : null; }
+function parseBox(s) { s = String(s || "").trim().toLowerCase(); if (!s) return null;
+  const exact = Object.entries(boxes()).find(([, n]) => n.toLowerCase() === s); if (exact) return exact[0];
+  if (s.startsWith("f")) return "fragile"; if (s.startsWith("h") || s.includes("tech")) return "hobby"; if (s.startsWith("s") || s.includes("collect")) return "soft"; const c = Object.entries(S.settings.boxes || {}).find(([, n]) => n.toLowerCase().startsWith(s)); return c ? c[0] : null; }
 function md(t) {
   let html = h(t).split("\n").map(l => {
     if (/^#{1,4} /.test(l)) return "<h4>" + l.replace(/^#+ /, "") + "</h4>";
@@ -385,8 +387,9 @@ function renderTabs() {
   const tl = $("#toolsBtn"); if (tl) { if (S.tab === "tools") tl.setAttribute("aria-current", "page"); else tl.removeAttribute("aria-current"); }
   const g = $("#gear"); if (g) { if (S.tab === "settings") g.setAttribute("aria-current", "page"); else g.removeAttribute("aria-current"); }
 }
-const boxTag = b => { if (!b || !boxes()[b]) return ""; const ci = Object.keys(S.settings.boxes || {}).indexOf(b);
-  return `<span class="box ${h(b)}"${ci >= 0 ? ` style="--bx: var(--c${ci % 7 + 1})"` : ""}><i></i>${h(boxName(b))}</span>`; };
+// Custom boxes get a color by their order (built-ins have their own CSS colors).
+const boxStyle = b => { const ci = Object.keys(S.settings.boxes || {}).indexOf(b); return ci >= 0 ? ` style="--bx: var(--c${ci % 7 + 1})"` : ""; };
+const boxTag = b => (!b || !boxes()[b]) ? "" : `<span class="box ${h(b)}"${boxStyle(b)}><i></i>${h(boxName(b))}</span>`;
 // Stage dropdowns stay short: Intake, Photographed and Drafted all show as "To list" (picking it moves an item back to Intake).
 const STAGE_PICK = [["tolist", "To list"], ["listed", "Listed"], ["sold", "Sold"], ["shipped", "Shipped"], ["complete", "Done"]];
 function stageOpts(cur) {
@@ -1013,7 +1016,7 @@ document.addEventListener("click", async e => {
       const lines = $("#aBulk").value.split(/\n/).map(l => l.trim()).filter(Boolean); let n = 0, skip = 0;
       for (const l of lines) { const parts = l.split(/\t|,/).map(x => x.trim()); const sku = parts[0]; if (!sku || /^sku$/i.test(sku)) continue;
         const id = skuId(sku); if (S.items[id]) { skip++; continue; }
-        let box = parseBox(parts[parts.length - 1]); let name = parts.slice(1, box && parts.length > 2 ? -1 : undefined).join(", ");
+        const box = parts.length > 2 ? parseBox(parts[parts.length - 1]) : null; const name = parts.slice(1, box ? -1 : undefined).join(", ");
         await saveItem(id, { sku, name, box: box || "", stage: "intake", createdAt: Date.now() }, { create: true }); useSku(sku); n++; }
       toast("Imported " + n + " item(s)" + (skip ? ", skipped " + skip + " existing" : "")); $("#aBulk").value = ""; break; }
     case "cam": $("#camIn").click(); break;

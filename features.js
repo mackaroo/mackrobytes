@@ -561,7 +561,7 @@ function homeListHTML() {
   // Just photo, SKU, box and stage. The name shows only until there's a photo to recognize the item by.
   return rows.map(([id, it]) => `<div class="inv-row" role="button" tabindex="0" data-act="open" data-id="${h(id)}">${thumb(it)}
       <div style="min-width:0"><div class="t">${h(it.sku || id)}</div>${!(it.photos || []).length && !it.thumb && it.name ? `<div class="nm small muted">${h(it.name)}</div>` : ""}</div>
-      <div class="inv-sel"><select class="box-sel ${h(it.box || "none")}" data-qbox="${h(id)}" data-act="noop" aria-label="Box"${(ci => ci >= 0 ? ` style="--bx: var(--c${ci % 7 + 1})"` : "")(Object.keys(S.settings.boxes || {}).indexOf(it.box))}>${boxOpts(it.box || "", true)}</select>
+      <div class="inv-sel"><select class="box-sel ${h(it.box || "none")}" data-qbox="${h(id)}" data-act="noop" aria-label="Box"${boxStyle(it.box)}>${boxOpts(it.box || "", true)}</select>
       <select class="st-${STAGE_IDX[it.stage || "intake"] <= 2 ? "intake" : h(it.stage)}" data-qstage="${h(id)}" data-act="noop" aria-label="Stage">${stageOpts(it.stage)}</select></div></div>`).join("");
 }
 function homeInvHTML() {

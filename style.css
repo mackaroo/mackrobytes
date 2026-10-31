@@ -415,14 +415,13 @@ body::before { content: ""; position: fixed; inset: 0; z-index: -1; pointer-even
 .inv-row { display: grid; grid-template-columns: 64px minmax(90px, 1fr) auto; gap: 12px; align-items: center; padding: 8px 6px; border-top: 1px solid var(--line); cursor: pointer; border-radius: 10px; }
 .inv-row:first-child { border-top: 0; }
 .inv-row .thumb { width: 64px; height: 64px; border-radius: 12px; }
-.inv-row .t { font-size: 16px; }
 .inv-row .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 2px; }
 .inv-sel { display: flex; gap: 8px; }
 .inv-sel select { width: 150px; }
 .box-sel { --bx: transparent; background-color: color-mix(in srgb, var(--bx) 22%, var(--surface)); }
 .box-sel.fragile { --bx: var(--fr); } .box-sel.hobby { --bx: var(--ht); } .box-sel.soft { --bx: var(--sc); }
 .box-sel.none { color: var(--muted); }
-.inv-row .t { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.inv-row .t { font-size: 16px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .inv-row select { padding: 6px 8px; font-size: 13.5px; border-radius: 10px; }
 @media (max-width: 560px) { .inv-row { grid-template-columns: 56px minmax(0, 1fr); row-gap: 6px; } .inv-row .thumb { width: 56px; height: 56px; grid-row: span 2; } .inv-sel select { width: auto; flex: 1; min-width: 0; } }
 .prog { height: 8px; border-radius: 4px; background: var(--line-2); overflow: hidden; }
