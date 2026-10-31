@@ -416,6 +416,7 @@ body::before { content: ""; position: fixed; inset: 0; z-index: -1; pointer-even
 .inv-row:first-child { border-top: 0; }
 .inv-row .thumb { width: 64px; height: 64px; border-radius: 12px; }
 .inv-row .t { font-size: 16px; }
+.inv-row .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 2px; }
 .inv-sel { display: flex; gap: 8px; }
 .inv-sel select { width: 150px; }
 .box-sel { --bx: transparent; background-color: color-mix(in srgb, var(--bx) 22%, var(--surface)); }

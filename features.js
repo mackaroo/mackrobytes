@@ -558,9 +558,9 @@ function homeListHTML() {
     (!q || [id, it.sku, it.name, it.brand, it.model, it.official].join(" ").toLowerCase().includes(q)))
     .sort((a, b) => (b[1].updatedAt || 0) - (a[1].updatedAt || 0));
   if (!rows.length) return `<div class="empty"><b>${Object.keys(S.items).length ? "Nothing here." : "No items yet."}</b></div>`;
-  // Just photo, SKU, box and stage: the name and price live on the item page.
+  // Just photo, SKU, box and stage. The name shows only until there's a photo to recognize the item by.
   return rows.map(([id, it]) => `<div class="inv-row" role="button" tabindex="0" data-act="open" data-id="${h(id)}">${thumb(it)}
-      <div class="t">${h(it.sku || id)}</div>
+      <div style="min-width:0"><div class="t">${h(it.sku || id)}</div>${!(it.photos || []).length && !it.thumb && it.name ? `<div class="nm small muted">${h(it.name)}</div>` : ""}</div>
       <div class="inv-sel"><select class="box-sel ${h(it.box || "none")}" data-qbox="${h(id)}" data-act="noop" aria-label="Box"${(ci => ci >= 0 ? ` style="--bx: var(--c${ci % 7 + 1})"` : "")(Object.keys(S.settings.boxes || {}).indexOf(it.box))}>${boxOpts(it.box || "", true)}</select>
       <select class="st-${h(it.stage || "intake")}" data-qstage="${h(id)}" data-act="noop" aria-label="Stage">${STAGES.map(([k, n]) => `<option value="${k}" ${(it.stage || "intake") === k ? "selected" : ""}>${n}</option>`).join("")}</select></div></div>`).join("");
 }
