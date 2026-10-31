@@ -543,15 +543,16 @@ document.addEventListener("click", async e => {
 });
 
 /* ---------- home overview: every item in one list, plus the laptop sidebar ---------- */
-const HOME = { stage: "all", q: "" };
-const HOME_STAGES = [["all", "All"], ["tolist", "To list"], ["listed", "Listed"], ["sold", "To ship"], ["shipped", "Shipped"], ["complete", "Done"], ["info", "Needs info"]];
+// Home opens on what still needs listing; listed, sold and shipped items are one tap away.
+const HOME = { stage: "tolist", q: "" };
+const HOME_STAGES = [["tolist", "Unlisted"], ["listed", "Listed"], ["sold", "Sold"], ["done", "Shipped & done"], ["info", "Needs info"], ["all", "All"]];
 // Unsold items missing details: same checks as the "Needs attention" rules for photos, listing text, price check and weight.
 function needsInfo(it) {
   const stg = STAGE_IDX[it.stage || "intake"]; if (stg >= 4 || it.stage === "sold") return false;
   return !it.name || (stg >= 1 && (it.photos || []).length < 3) || (stg >= 1 && it.listOn !== "fblocal" && num(it.weightOz) == null) ||
     (stg >= 2 && !hasCopy(it, it.listOn)) || (stg >= 2 && mainPrice(it) == null);
 }
-const inHomeStage = (it, k) => k === "all" || (k === "info" ? needsInfo(it) : k === "tolist" ? STAGE_IDX[it.stage || "intake"] <= 2 : (it.stage || "intake") === k);
+const inHomeStage = (it, k) => k === "all" || (k === "info" ? needsInfo(it) : k === "tolist" ? STAGE_IDX[it.stage || "intake"] <= 2 : k === "done" ? it.stage === "shipped" || it.stage === "complete" : (it.stage || "intake") === k);
 function homeListHTML() {
   const q = HOME.q.toLowerCase();
   const rows = Object.entries(S.items).filter(([id, it]) => inHomeStage(it, HOME.stage) &&
@@ -582,12 +583,11 @@ document.addEventListener("input", e => {
 // Change an item's stage right from the home list without opening it.
 document.addEventListener("change", e => {
   const t = e.target, id = t.dataset && t.dataset.qstage; if (!id || !S.items[id]) return;
-  // Sold and Shipped need the sale details, so open the item at Mark sold instead.
-  if (STAGE_IDX[t.value] >= 4 && t.value !== "complete" && !S.items[id].sale) { t.value = S.items[id].stage || "intake"; openDetail(id); const pr = $("#sPrice"); if (pr) { pr.scrollIntoView({ block: "center" }); pr.focus(); } toast("Enter what it sold for, then Mark sold."); return; }
+  if (STAGE_IDX[t.value] >= 4 && t.value !== "complete" && !S.items[id].sale) { quickSold(id, t.value); t.blur(); toast((S.items[id].sku || id) + " → " + stageName(t.value) + ". Add the price any time."); return; }
   saveItem(id, { stage: t.value, ...(t.value === "complete" ? { completedAt: Date.now() } : {}) }); t.blur();
   toast((S.items[id].sku || id) + " → " + (STAGE_IDX[t.value] <= 2 ? "To list" : stageName(t.value)));
 });
-document.addEventListener("keydown", e => { if (e.key === "Enter" && e.target.matches && e.target.matches(".inv-row")) openDetail(e.target.dataset.id); });
+document.addEventListener("keydown", e => { if (e.key === "Enter" && e.target.matches && e.target.matches(".inv-row, div.row-item")) openDetail(e.target.dataset.id); });
 // Laptop: the item page is a drawer on the right, so a click anywhere to its left just closes it (back to the page you were on).
 document.addEventListener("click", e => {
   if (!S.open || !matchMedia("(min-width: 1000px)").matches) return;

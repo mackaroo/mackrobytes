@@ -449,7 +449,7 @@ const VIEWS = {
     <div class="home-grid">
       <section class="card inv">${homeInvHTML()}</section>
       <div class="home-side">
-        ${toPack.length ? `<section class="card"><div class="card-h"><h2>To pack</h2><span class="pill warn sp">${toPack.length}</span></div><div class="list">${toPack.map(([id, it]) => `<button class="row-item" data-act="open" data-id="${h(id)}">${thumb(it)}<div style="min-width:0"><div class="t">${h(it.sku || id)}</div><div class="m">${it.name ? `<span class="small muted">${h(it.name)}</span>` : ""}<span class="small muted">from</span>${boxTag(it.box)}</div></div><div class="r small muted">${h(PLAT[(it.sale || {}).platform] || "")}<br>${daysSince((it.sale || {}).date) ? daysSince(it.sale.date) + "d ago" : it.sale ? "today" : ""}</div></button>`).join("")}</div></section>` : ""}
+        ${toPack.length ? `<section class="card"><div class="card-h"><h2>To pack</h2><span class="pill warn sp">${toPack.length}</span></div><div class="list">${toPack.map(([id, it]) => `<div class="row-item" role="button" tabindex="0" data-act="open" data-id="${h(id)}">${thumb(it)}<div style="min-width:0"><div class="t">${h(it.sku || id)}</div><div class="m">${it.name ? `<span class="small muted">${h(it.name)}</span>` : ""}<span class="small muted">from</span>${boxTag(it.box)}</div></div><div class="r small muted">${daysSince((it.sale || {}).date) ? daysSince(it.sale.date) + "d ago" : it.sale ? "today" : ""}${it.sale && !it.sale.local ? `<br><button class="btn sm" data-act="labelPhoto" data-id="${h(id)}">Label photo</button>` : ""}</div></div>`).join("")}</div></section>` : ""}
         <section class="card"><div class="card-h"><h2>Needs attention</h2><span class="pill sp ${f.length ? "warn" : "on"}">${f.length || "All clear"}</span></div>
           ${f.length ? `<div>${f.slice(0, 6).map(x => `<div class="finding" data-act="open" data-id="${h(x.id)}"><span class="sev ${x.sev}"></span><div style="min-width:0"><div class="small" style="font-weight:600">${h(x.text)}</div></div></div>`).join("")}</div>${f.length > 6 ? `<p class="small muted" style="margin:0">+${f.length - 6} more</p>` : ""}` : `<p class="muted small" style="margin:0">Nothing to fix.</p>`}</section>
         ${priceCheckCardHTML()}
@@ -676,7 +676,7 @@ function periodRange(p) {
 }
 // Older sales only stored net; rebuild their breakdown from the item.
 function saleParts(it) {
-  const s = it.sale; if (s.fees != null && s.gross != null) return s;
+  const s = it.sale; if ((s.fees != null && s.gross != null) || num(s.price) == null) return s;
   const sp = shipPlan(it); const r = netFor(s.platform, { price: num(s.price), ship: num(s.ship) || 0, label: s.local ? 0 : (num(it.labelCost) ?? sp.cost ?? 0), pkg: s.local ? 0 : pkgCost(sp.pkg), cost: num(it.cost) || 0, local: s.local });
   return { ...s, gross: r.gross, fees: r.fees, label: r.label, pkg: r.pkg, cost: r.cost, net: num(s.net) ?? r.net };
 }
@@ -906,18 +906,43 @@ function renderDetail() {
 
     <section class="card"><h2>Sale</h2>
       ${it.sale && it.stage === "sold" ? `<div class="pick"><span>Grab</span><span class="big">${h(it.sku || id)}</span>${it.box ? `<span>from the</span>${boxTag(it.box)}<span>box</span>` : ""}</div>` : ""}
-      ${it.sale ? `<p class="small">Sold on <b>${h(PLAT[it.sale.platform])}</b> for <span class="mono">${money(num(it.sale.price))}</span> on ${new Date(it.sale.date).toLocaleDateString()}. Net <b class="mono ${it.sale.net >= 0 ? "pos" : "neg"}">${money(it.sale.net)}</b>.${it.sale.shippedAt ? " Shipped " + new Date(it.sale.shippedAt).toLocaleDateString() + "." : ""}</p>
-        ${fld(it, "sale.tracking", "Tracking number")}
-        <div class="btns">${it.stage === "sold" ? `<button class="btn primary" data-act="shipped">Mark shipped</button>` : ""}${it.stage === "shipped" ? `<button class="btn primary" data-act="complete">Mark complete</button>` : ""}<button class="btn ghost" data-act="unsell">Undo sale</button></div>
+      ${it.sale ? `<p class="small">Sold on <b>${h(PLAT[it.sale.platform])}</b>${num(it.sale.price) != null ? ` for <span class="mono">${money(num(it.sale.price))}</span>` : ""} on ${new Date(it.sale.date).toLocaleDateString()}.${num(it.sale.price) != null ? ` Net <b class="mono ${it.sale.net >= 0 ? "pos" : "neg"}">${money(it.sale.net)}</b>.` : ""}${it.sale.shippedAt ? " Shipped " + new Date(it.sale.shippedAt).toLocaleDateString() + "." : ""}</p>
+        ${num(it.sale.price) == null ? `<div class="grid2">${saleFieldsHTML(it, it.sale.local)}</div><div class="btns"><button class="btn" data-act="salePrice">Save price</button></div>` : ""}
+        ${it.sale.local ? "" : labelPhotoHTML(it)}
+        <div class="btns">${it.stage === "sold" ? `<button class="btn ${it.sale.local ? "primary" : ""}" data-act="shipped">Mark shipped</button>` : ""}${it.stage === "shipped" ? `<button class="btn primary" data-act="complete">Mark complete</button>` : ""}<button class="btn ghost" data-act="unsell">Undo sale</button></div>
         ${Object.keys(PLAT).filter(p => p !== it.sale.platform && (pl[p] || {}).status === "listed").length ? `<div class="banner">Still listed on ${Object.keys(PLAT).filter(p => p !== it.sale.platform && (pl[p] || {}).status === "listed").map(p => PLAT[p]).join(", ")}. Remove those listings now so you don't double-sell.</div>` : ""}`
-      : `<div class="grid2"><label class="f">Sold on<select id="sPlat">${PLAT4.map(([k, n]) => `<option value="${k}" ${(it.listOn || "ebay") === k ? "selected" : ""}>${n}</option>`).join("")}</select></label><label class="f">Sold for $<input type="number" inputmode="decimal" step="0.01" id="sPrice"></label>
-        <label class="f ship-only" ${it.listOn === "fblocal" ? "hidden" : ""}>Buyer paid shipping $<input type="number" inputmode="decimal" step="0.01" id="sShip" placeholder="0"></label><label class="f ship-only" ${it.listOn === "fblocal" ? "hidden" : ""}>Label cost $<input type="number" inputmode="decimal" step="0.01" id="sLabel" value="${h(it.labelCost ?? "")}" placeholder="${h(shipPlan(it).cost ?? "")}"></label></div>
+      : `<div class="grid2"><label class="f">Sold on<select id="sPlat">${PLAT4.map(([k, n]) => `<option value="${k}" ${(it.listOn || "ebay") === k ? "selected" : ""}>${n}</option>`).join("")}</select></label>${saleFieldsHTML(it, it.listOn === "fblocal")}</div>
+        <p class="small muted" style="margin:0">Price is optional. You can add it later.</p>
         <button class="btn primary" data-act="sold">Mark sold</button>`}
     </section>
 
     <section class="card flat"><div class="btns"><button class="btn danger" data-act="del">Delete item</button><span id="delConfirm"></span></div></section>
   </div></div>`;
   $(".sheet-body", sheet).scrollTop = y;
+  const lp = it.sale && it.sale.labelPhoto, li = $("#labelImg", sheet);
+  if (lp && li) photoFetchUrl(lp).then(u => { li.src = u; }).catch(() => {});
+}
+function saleFieldsHTML(it, local) {
+  return `<label class="f">Sold for $<input type="number" inputmode="decimal" step="0.01" id="sPrice" placeholder="Optional"></label>
+    <label class="f ship-only" ${local ? "hidden" : ""}>Buyer paid shipping $<input type="number" inputmode="decimal" step="0.01" id="sShip" placeholder="0"></label><label class="f ship-only" ${local ? "hidden" : ""}>Label cost $<input type="number" inputmode="decimal" step="0.01" id="sLabel" value="${h(it.labelCost ?? "")}" placeholder="${h(shipPlan(it).cost ?? "")}"></label>`;
+}
+// A photo of the printed label (with the SKU in the shot) stands in for typing the tracking number.
+function labelPhotoHTML(it) {
+  const lp = it.sale.labelPhoto;
+  return lp ? `<div class="label-ph"><img id="labelImg" alt="Shipping label" data-act="labelView"><div><b class="small">Label photo</b><div class="small muted">${new Date(lp.at).toLocaleDateString()}</div><button class="btn sm" data-act="labelPhoto">Replace</button></div></div>`
+    : `<div class="btns"><button class="btn primary" data-act="labelPhoto">Add label photo</button><span class="small muted">Marks it shipped</span></div>`;
+}
+async function addLabelPhoto(id, file) {
+  const it = S.items[id]; if (!it || !it.sale || !file) return;
+  toast("Saving label photo…");
+  try {
+    const old = it.sale.labelPhoto;
+    const lp = { id: await storePhoto(await fileToJpeg(file)), at: Date.now() };
+    const shipNow = it.stage === "sold";
+    await saveItem(id, { ...(shipNow ? { stage: "shipped" } : {}), sale: { labelPhoto: lp, ...(shipNow ? { shippedAt: Date.now() } : {}) } });
+    if (old && ASSETS) ASSETS.delete(old.id).catch(() => {});
+    toast((it.sku || id) + (shipNow ? " shipped. Label saved" : " label saved"));
+  } catch (e) { toast(storageFull(e) ? "Photo storage is full. Delete some old photos." : "The label photo couldn't be saved. Try again."); }
 }
 /* ---------- actions ---------- */
 async function generateListing() {
@@ -983,16 +1008,33 @@ Be direct and professional. If the inventory is small or missing data, say what 
   const t = await runAI(btn, "#auditOut", prompt);
   if (t) await saveAudit(today(), { date: today(), text: t, createdAt: Date.now() });
 }
-async function markSold() {
-  const id = S.open; const it = S.items[id]; let p = $("#sPlat").value; const local = p === "fblocal"; if (local) p = "fb";
-  const price = num($("#sPrice").value); if (price == null) { toast("Enter the sale price."); return; }
-  const shipIn = num($("#sShip").value);
-  const labelIn = num($("#sLabel").value);
+// Money side of a sale. With no price yet everything stays blank (counts as $0) until the price is added.
+function saleMoney(it, p, local, price, shipIn, labelIn) {
+  if (price == null) return { price: null, ship: null, gross: null, fees: null, label: null, pkg: null, cost: null, net: null };
   const sp = shipPlan(it); const label = local ? 0 : (labelIn ?? num(it.labelCost) ?? sp.cost ?? 0);
   const r = netFor(p, { price, ship: local ? 0 : (shipIn ?? (it.freeShip ? 0 : label)), label, pkg: local ? 0 : pkgCost(sp.pkg), cost: num(it.cost) || 0, local });
   const r2 = x => Math.round(x * 100) / 100;
-  await saveItem(id, { stage: local ? "complete" : "sold", completedAt: local ? Date.now() : null, ...(labelIn != null && !local ? { labelCost: labelIn } : {}), sale: { platform: p, local, price, ship: r.ship, gross: r2(r.gross), fees: r2(r.fees), label: r2(r.label), pkg: r2(r.pkg), cost: r2(r.cost), net: r2(r.net), date: Date.now() }, plat: { [p]: { status: "ended" } } });
-  toast("Marked sold. Net " + money(r.net));
+  return { price, ship: r.ship, gross: r2(r.gross), fees: r2(r.fees), label: r2(r.label), pkg: r2(r.pkg), cost: r2(r.cost), net: r2(r.net) };
+}
+async function markSold() {
+  const id = S.open; const it = S.items[id]; let p = $("#sPlat").value; const local = p === "fblocal"; if (local) p = "fb";
+  const price = num($("#sPrice").value), labelIn = num($("#sLabel").value);
+  const m = saleMoney(it, p, local, price, num($("#sShip").value), labelIn);
+  await saveItem(id, { stage: local ? "complete" : "sold", completedAt: local ? Date.now() : null, ...(labelIn != null && !local ? { labelCost: labelIn } : {}), sale: { platform: p, local, ...m, date: Date.now() }, plat: { [p]: { status: "ended" } } });
+  toast(price == null ? "Marked sold" : "Marked sold. Net " + money(m.net));
+}
+// Picking Sold/Shipped from a stage dropdown: record the sale on the item's platform, price to come later.
+function quickSold(id, stage) {
+  const it = S.items[id]; const local = it.listOn === "fblocal"; const p = local ? "fb" : LIST_PLAT[it.listOn] || "ebay";
+  return saveItem(id, { stage: local ? "complete" : stage, completedAt: local ? Date.now() : null, sale: { platform: p, local, ...saleMoney(it, p, local, null), date: Date.now(), ...(stage === "shipped" && !local ? { shippedAt: Date.now() } : {}) }, plat: { [p]: { status: "ended" } } });
+}
+async function addSalePrice() {
+  const id = S.open; const it = S.items[id]; const s = it.sale;
+  const price = num($("#sPrice").value); if (price == null) { toast("Enter what it sold for."); return; }
+  const labelIn = $("#sLabel") ? num($("#sLabel").value) : null;
+  const m = saleMoney(it, s.platform, s.local, price, $("#sShip") ? num($("#sShip").value) : null, labelIn);
+  await saveItem(id, { ...(labelIn != null && !s.local ? { labelCost: labelIn } : {}), sale: m });
+  toast("Net " + money(m.net));
 }
 
 document.addEventListener("click", async e => {
@@ -1025,11 +1067,14 @@ document.addEventListener("click", async e => {
     case "gen": generateListing(); break;
     case "audit": runAudit(t); break;
     case "sold": markSold(); break;
+    case "salePrice": addSalePrice(); break;
+    case "labelPhoto": S.labelFor = t.dataset.id || S.open; $("#labelIn").click(); break;
+    case "labelView": { const lp = S.open && (S.items[S.open].sale || {}).labelPhoto; if (lp) window.open(await photoFetchUrl(lp), "_blank", "noopener"); break; }
     case "shipped": saveItem(S.open, { stage: "shipped", sale: { shippedAt: Date.now() } }); break;
     case "complete": saveItem(S.open, { stage: "complete", completedAt: Date.now() }); break;
-    case "unsell": { const sp = (S.items[S.open].sale || {}).platform; saveItem(S.open, { stage: "listed", sale: null, completedAt: null, ...(sp ? { plat: { [sp]: { status: "listed" } } } : {}) }); break; }
+    case "unsell": { const sp = (S.items[S.open].sale || {}).platform, lp = (S.items[S.open].sale || {}).labelPhoto; if (lp && ASSETS) ASSETS.delete(lp.id).catch(() => {}); saveItem(S.open, { stage: "listed", sale: null, completedAt: null, ...(sp ? { plat: { [sp]: { status: "listed" } } } : {}) }); break; }
     case "del": $("#delConfirm").innerHTML = `<span class="small">Delete this item and its data?</span> <button class="btn sm danger" data-act="delYes">Yes, delete</button>`; break;
-    case "delYes": { const id = S.open; const photos = S.items[id].photos || []; closeDetail(); await deleteItem(id); if (ASSETS) for (const p of photos) ASSETS.delete(p.id).catch(() => {}); toast("Item deleted"); break; }
+    case "delYes": { const id = S.open; const photos = [...(S.items[id].photos || []), ...((S.items[id].sale || {}).labelPhoto ? [S.items[id].sale.labelPhoto] : [])]; closeDetail(); await deleteItem(id); if (ASSETS) for (const p of photos) ASSETS.delete(p.id).catch(() => {}); toast("Item deleted"); break; }
     case "bundleAI": {
       const sel = Object.keys(S.bundle.sel).filter(k => S.bundle.sel[k] && S.items[k]);
       runAI(t, "#bundleOut", `You are a reseller pricing expert.\n\n${profileText()}\n\nA buyer wants these items together on ${PLAT[S.bundle.plat]}:\n${JSON.stringify(sel.map(k => itemForAI(S.items[k], k)))}\n\nThe seller is considering ${S.bundle.pct}% off. In plain Markdown ("- " bullets, under 200 words): is that discount smart, what bundle price to counter with, how to ship them together (one box? padding?), and how to word the offer message.`); break; }
@@ -1085,6 +1130,7 @@ function exportData() {
 document.addEventListener("change", async e => {
   const t = e.target;
   if (t.id === "camIn" || t.id === "libIn") { const files = [...t.files]; t.value = ""; if (S.open) addPhotos(S.open, files); return; }
+  if (t.id === "labelIn") { const f = t.files[0]; t.value = ""; if (S.labelFor) addLabelPhoto(S.labelFor, f); return; }
   if (t.id === "importIn") {
     const f = t.files[0]; t.value = ""; if (!f) return;
     try { const d = JSON.parse(await f.text()); let n = 0; if (d.settings) await saveSettings(d.settings);
@@ -1113,8 +1159,7 @@ document.addEventListener("change", async e => {
     const p = t.dataset.f; const it = S.items[S.open];
     let v = t.type === "checkbox" ? t.checked : t.dataset.num ? num(t.value) : t.value;
     let patch = pathPatch(p, v);
-    // Sold and Shipped need the sale details, so those go through Mark sold.
-    if (p === "stage" && STAGE_IDX[v] >= 4 && v !== "complete" && !it.sale) { t.value = it.stage || "intake"; toast("Use Mark sold at the bottom to record the sale."); const pr = $("#sPrice"); if (pr) { pr.scrollIntoView({ block: "center" }); pr.focus(); } return; }
+    if (p === "stage" && STAGE_IDX[v] >= 4 && v !== "complete" && !it.sale) { await quickSold(S.open, v); detailSig = ""; t.blur(); renderSoon(); return; }
     if (p === "costPre") patch.cost = v == null ? null : Math.round(v * (1 + (num(S.settings.buyTaxPct) ?? 6) / 100) * 100) / 100;
     if (p === "stage" && v === "complete") patch.completedAt = Date.now();
     if (/^plat\.\w+\.status$/.test(p)) { const pf = p.split(".")[1];

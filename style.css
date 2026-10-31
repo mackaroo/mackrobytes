@@ -544,3 +544,9 @@ body::before, body::after { display: none; }
   .home-grid { display: grid; grid-template-columns: minmax(0, 1fr) 330px; gap: 14px; align-items: start; }
   .home-side { position: sticky; top: 64px; max-height: calc(100vh - 80px); overflow-y: auto; }
 }
+
+/* label photo on sold items */
+.label-ph { display: flex; gap: 12px; align-items: center; }
+.label-ph img { width: 96px; height: 96px; object-fit: cover; border-radius: 10px; border: 1px solid var(--line); background: var(--soft, transparent); cursor: zoom-in; }
+.label-ph .btn { margin-top: 6px; }
+.row-item .r .btn { margin-top: 4px; }
