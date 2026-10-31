@@ -562,7 +562,7 @@ function homeListHTML() {
   return rows.map(([id, it]) => `<div class="inv-row" role="button" tabindex="0" data-act="open" data-id="${h(id)}">${thumb(it)}
       <div style="min-width:0"><div class="t">${h(it.sku || id)}</div>${!(it.photos || []).length && !it.thumb && it.name ? `<div class="nm small muted">${h(it.name)}</div>` : ""}</div>
       <div class="inv-sel"><select class="box-sel ${h(it.box || "none")}" data-qbox="${h(id)}" data-act="noop" aria-label="Box"${(ci => ci >= 0 ? ` style="--bx: var(--c${ci % 7 + 1})"` : "")(Object.keys(S.settings.boxes || {}).indexOf(it.box))}>${boxOpts(it.box || "", true)}</select>
-      <select class="st-${h(it.stage || "intake")}" data-qstage="${h(id)}" data-act="noop" aria-label="Stage">${STAGES.map(([k, n]) => `<option value="${k}" ${(it.stage || "intake") === k ? "selected" : ""}>${n}</option>`).join("")}</select></div></div>`).join("");
+      <select class="st-${STAGE_IDX[it.stage || "intake"] <= 2 ? "intake" : h(it.stage)}" data-qstage="${h(id)}" data-act="noop" aria-label="Stage">${stageOpts(it.stage)}</select></div></div>`).join("");
 }
 function homeInvHTML() {
   const all = Object.values(S.items); const n = k => all.filter(it => inHomeStage(it, k)).length;
@@ -585,9 +585,15 @@ document.addEventListener("change", e => {
   // Sold and Shipped need the sale details, so open the item at Mark sold instead.
   if (STAGE_IDX[t.value] >= 4 && t.value !== "complete" && !S.items[id].sale) { t.value = S.items[id].stage || "intake"; openDetail(id); const pr = $("#sPrice"); if (pr) { pr.scrollIntoView({ block: "center" }); pr.focus(); } toast("Enter what it sold for, then Mark sold."); return; }
   saveItem(id, { stage: t.value, ...(t.value === "complete" ? { completedAt: Date.now() } : {}) }); t.blur();
-  toast((S.items[id].sku || id) + " → " + stageName(t.value));
+  toast((S.items[id].sku || id) + " → " + (STAGE_IDX[t.value] <= 2 ? "To list" : stageName(t.value)));
 });
 document.addEventListener("keydown", e => { if (e.key === "Enter" && e.target.matches && e.target.matches(".inv-row")) openDetail(e.target.dataset.id); });
+// Laptop: the item page is a drawer on the right, so a click anywhere to its left just closes it (back to the page you were on).
+document.addEventListener("click", e => {
+  if (!S.open || !matchMedia("(min-width: 1000px)").matches) return;
+  if (e.target.closest("#sheet, #editor, #modal, #toast, #sorter") || ["#editor", "#modal", "#sorter"].some(s => !document.querySelector(s).hidden)) return;
+  e.preventDefault(); e.stopPropagation(); closeDetail();
+}, true);
 // "+ New box…" in any box dropdown: name it, save it to settings, then let the normal handler save the item's box.
 document.addEventListener("change", e => {
   const t = e.target; if (t.tagName !== "SELECT" || t.value !== "__new" || !t.selectedOptions[0].hasAttribute("data-box")) return;

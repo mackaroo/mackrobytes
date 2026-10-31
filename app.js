@@ -387,6 +387,12 @@ function renderTabs() {
 }
 const boxTag = b => { if (!b || !boxes()[b]) return ""; const ci = Object.keys(S.settings.boxes || {}).indexOf(b);
   return `<span class="box ${h(b)}"${ci >= 0 ? ` style="--bx: var(--c${ci % 7 + 1})"` : ""}><i></i>${h(boxName(b))}</span>`; };
+// Stage dropdowns stay short: Intake, Photographed and Drafted all show as "To list" (picking it moves an item back to Intake).
+const STAGE_PICK = [["tolist", "To list"], ["listed", "Listed"], ["sold", "Sold"], ["shipped", "Shipped"], ["complete", "Done"]];
+function stageOpts(cur) {
+  cur = cur || "intake"; const early = STAGE_IDX[cur] <= 2;
+  return STAGE_PICK.map(([k, n]) => k === "tolist" ? `<option value="${early ? cur : "intake"}" ${early ? "selected" : ""}>${n}</option>` : `<option value="${k}" ${cur === k ? "selected" : ""}>${n}</option>`).join("");
+}
 const stageName = s => (STAGES.find(x => x[0] === (s || "intake")) || STAGES[0])[1];
 function thumb(it) { const p = (it.photos || [])[0]; return p ? `<img class="thumb" src="${h(photoSrc(p))}" alt="" loading="lazy">` : it.thumb ? `<img class="thumb" src="${h(it.thumb)}" alt="">` : `<div class="thumb">${it.shot ? "#" + it.shot : "no photo"}</div>`; }
 function itemListHTML() {
@@ -869,7 +875,7 @@ function renderDetail() {
   const photos = it.photos || [];
   sheet.className = "sheet";
   sheet.innerHTML = `<div class="sheet-top"><div class="wrap"><button class="btn sm" data-act="close" title="Back (Esc)">‹ Back</button>${boxTag(it.box)}
-    <select style="margin-left:auto;width:auto" data-f="stage" aria-label="Stage">${STAGES.map(([k, n]) => `<option value="${k}" ${(it.stage || "intake") === k ? "selected" : ""}>${n}</option>`).join("")}</select></div></div>
+    <select style="margin-left:auto;width:auto" data-f="stage" aria-label="Stage">${stageOpts(it.stage)}</select></div></div>
   <div class="sheet-body"><div class="wrap">
     <h1 class="item-sku">${h(it.sku || id)}</h1>
     <input type="text" data-f="name" id="f-name" value="${h(it.name || "")}" placeholder="What is it?" aria-label="Item name" style="background:transparent;border-color:transparent;padding-left:0;margin-top:-8px">
