@@ -39,6 +39,8 @@ const PKG_NAME = { envelope: "Rigid envelope / toploader", poly: "Poly mailer", 
 const $ = (s, r = document) => r.querySelector(s);
 const h = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const money = n => (n == null || !isFinite(n)) ? "—" : (n < 0 ? "−$" : "$") + Math.abs(n).toFixed(2);
+// Whole dollars with commas, for tiles too narrow for cents.
+const money0 = n => (n == null || !isFinite(n)) ? "—" : (n < 0 ? "−$" : "$") + Math.round(Math.abs(n)).toLocaleString("en-US");
 const num = v => { if (v === "" || v == null) return null; const n = parseFloat(String(v).replace(/[$,]/g, "")); return isFinite(n) ? n : null; };
 const getPath = (o, p) => p.split(".").reduce((a, k) => a == null ? a : a[k], o);
 const today = () => { const d = new Date(); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); };
@@ -425,13 +427,13 @@ const VIEWS = {
     const toPack = items.filter(([, it]) => it.stage === "sold");
     const f = ruleFindings().filter(x => S.items[x.id] && S.items[x.id].stage !== "sold"); const audit = S.audits[today()];
     const latest = Object.values(S.audits).sort((a, b) => (b.date || "").localeCompare(a.date || ""))[0];
-    const kpi = (n, label, act, v) => `<button class="kpi" data-act="${act}" data-v="${v}"><b>${n}</b><span>${label}</span></button>`;
+    const kpi = (n, label, act, v) => `<button class="kpi" data-act="${act}" data-v="${v}"><b title="${h(String(n))}">${n}</b><span>${label}</span></button>`;
     return `
     ${LOCAL ? `<div class="banner">Preview mode · changes stay in this browser</div>` : ""}
     <div><div class="hello">Hello, ${h(s.ownerName || "Mackenzie")}.</div><div class="hello-sub">${new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}</div></div>
     <div class="kpis">
       ${kpi(counts.intake + counts.photographed + counts.drafted, "To list", "homeStage", "tolist")}${kpi(counts.listed, "Listed", "homeStage", "listed")}${kpi(counts.sold, "To ship", "homeStage", "sold")}${kpi(undecided().length, "To sort", "tab", "sort")}${kpi(items.filter(([, it]) => needsInfo(it)).length, "Needs info", "homeStage", "info")}
-      ${kpi(money(listedVal), "Listed value", "homeStage", "listed")}${kpi(money(netMonth), `Net this month · ${soldMonth.length} sold`, "tab", "profit")}
+      ${kpi(money0(listedVal), "Listed value", "homeStage", "listed")}${kpi(money0(netMonth), `Net this month · ${soldMonth.length} sold`, "tab", "profit")}
     </div>
     <div class="mob-only">${goalCardHTML()}</div>
     <div class="mob-only">${quickAddHTML()}</div>

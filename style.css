@@ -538,7 +538,7 @@ body::before, body::after { display: none; }
 .top.scrolled { backdrop-filter: none; -webkit-backdrop-filter: none; background: var(--sky-1); }
 
 /* 7 home KPI boxes: one row on laptop */
-@media (min-width: 1000px) { .kpis { grid-template-columns: repeat(7, minmax(0, 1fr)); } .kpis > .kpi:last-child { grid-column: auto; } }
+@media (min-width: 1000px) { .kpis { grid-template-columns: repeat(7, minmax(0, 1fr)); } .kpis > .kpi:last-child { grid-column: auto; } .kpi b { font-size: clamp(17px, 1.6vw, 22px); } }
 
 /* home side column only sits beside the list when there's room; narrower windows stack it below so SKUs aren't crushed */
 @media (min-width: 1280px) {
