@@ -544,12 +544,7 @@ document.addEventListener("click", async e => {
 
 /* ---------- home overview: every item in one list, plus the laptop sidebar ---------- */
 // Home opens on what still needs listing; listed, sold and shipped items are one tap away.
-const HOME = { stage: "tolist", q: "", sort: lsGet("mb-home-sort", "skuNew") };
-const bySku = (a, b) => String(a.sku || "").localeCompare(String(b.sku || ""), undefined, { numeric: true });
-const HOME_SORTS = [["skuNew", "Newest SKU", (a, b) => bySku(b, a)], ["skuOld", "Oldest SKU", bySku],
-  ["edited", "Recently edited", (a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)],
-  ["name", "Name A–Z", (a, b) => (a.name || "").localeCompare(b.name || "") || bySku(b, a)],
-  ["box", "Box", (a, b) => boxName(a.box || "").localeCompare(boxName(b.box || "")) || bySku(b, a)]];
+const HOME = { stage: "tolist", q: "" };
 const HOME_STAGES = [["tolist", "Unlisted"], ["listed", "Listed"], ["sold", "Sold"], ["done", "Shipped & done"], ["info", "Needs info"], ["all", "All"]];
 // Unsold items missing details: same checks as the "Needs attention" rules for photos, listing text, price check and weight.
 function needsInfo(it) {
@@ -562,10 +557,10 @@ function homeListHTML() {
   const q = HOME.q.toLowerCase();
   const rows = Object.entries(S.items).filter(([id, it]) => inHomeStage(it, HOME.stage) &&
     (!q || [id, it.sku, it.name, it.brand, it.model, it.official].join(" ").toLowerCase().includes(q)))
-    .sort((a, b) => (HOME_SORTS.find(x => x[0] === HOME.sort) || HOME_SORTS[0])[2](a[1], b[1]));
+    .sort((a, b) => (b[1].updatedAt || 0) - (a[1].updatedAt || 0));
   if (!rows.length) return `<div class="empty"><b>${Object.keys(S.items).length ? "Nothing here." : "No items yet."}</b></div>`;
   // Just photo, SKU, box and stage. The name shows only until there's a photo to recognize the item by.
-  return rows.map(([id, it]) => `<div class="inv-row${id === STATION.last ? " fresh" : ""}" role="button" tabindex="0" data-act="open" data-id="${h(id)}">${thumb(it)}
+  return rows.map(([id, it]) => `<div class="inv-row" role="button" tabindex="0" data-act="open" data-id="${h(id)}">${thumb(it)}
       <div style="min-width:0"><div class="t">${h(it.sku || id)}</div>${!(it.photos || []).length && !it.thumb && it.name ? `<div class="nm small muted">${h(it.name)}</div>` : ""}</div>
       <div class="inv-sel"><select class="box-sel ${h(it.box || "none")}" data-qbox="${h(id)}" data-act="noop" aria-label="Box"${boxStyle(it.box)}>${boxOpts(it.box || "", true)}</select>
       <select class="st-${STAGE_IDX[it.stage || "intake"] <= 2 ? "intake" : h(it.stage)}" data-qstage="${h(id)}" data-act="noop" aria-label="Stage">${stageOpts(it.stage)}</select></div></div>`).join("");
@@ -573,8 +568,7 @@ function homeListHTML() {
 function homeInvHTML() {
   const all = Object.values(S.items); const n = k => all.filter(it => inHomeStage(it, k)).length;
   return `<div class="card-h"><h2>All items</h2><span class="muted small">${all.length}</span><button class="btn sm sp" data-act="tab" data-v="items">Filters & sorting</button></div>
-    <div class="inv-tools"><input type="search" placeholder="Search name, SKU, brand" value="${h(HOME.q)}" data-act-input="homeSearch" aria-label="Search all items">
-      <select data-home-sort aria-label="Sort">${HOME_SORTS.map(([k, l]) => `<option value="${k}" ${HOME.sort === k ? "selected" : ""}>${l}</option>`).join("")}</select></div>
+    <input type="search" placeholder="Search name, SKU, brand" value="${h(HOME.q)}" data-act-input="homeSearch" aria-label="Search all items">
     <div class="seg">${HOME_STAGES.map(([k, l]) => `<button data-act="homeStage" data-v="${k}" aria-pressed="${HOME.stage === k}">${l}<span>${n(k)}</span></button>`).join("")}</div>
     <div class="inv-list" id="homeList">${homeListHTML()}</div>`;
 }
@@ -585,11 +579,6 @@ document.addEventListener("click", e => {
 document.addEventListener("input", e => {
   if (e.target.dataset.actInput !== "homeSearch") return;
   HOME.q = e.target.value; const l = document.getElementById("homeList"); if (l) l.innerHTML = homeListHTML();
-});
-document.addEventListener("change", e => {
-  if (!e.target.matches("[data-home-sort]")) return;
-  HOME.sort = e.target.value; lsSet("mb-home-sort", HOME.sort); e.target.blur();
-  const l = document.getElementById("homeList"); if (l) l.innerHTML = homeListHTML();
 });
 // Change an item's stage right from the home list without opening it.
 document.addEventListener("change", e => {
@@ -630,91 +619,8 @@ function renderSide() {
   const el = document.getElementById("side"); if (!el || el.contains(document.activeElement)) return;
   const goal = Math.max(1, num(S.settings.weeklyGoal) || 3), n = listedThisWeek(), days = 7 - ((new Date().getDay() + 6) % 7);
   const link = (k, name) => `<button class="tab" data-act="tab" data-v="${k}" ${S.tab === k ? 'aria-current="page"' : ""}><svg viewBox="0 0 24 24" aria-hidden="true">${SIDE_ICONS[k]}</svg>${name}</button>`;
-  el.innerHTML = `${S.tab === "today" ? "" : `<div class="side-sec"><div class="eyebrow">Quick add</div>${quickAddHTML()}</div>`}
+  el.innerHTML = `<div class="side-sec"><div class="eyebrow">Quick add</div>${quickAddHTML()}</div>
     <div class="side-sec"><div class="eyebrow">This week</div><div class="prog"><i style="width:${Math.min(100, Math.round(n / goal * 100))}%"></i></div>
       <div class="small muted">${n} of ${goal} listed · ${days}d left</div></div>
     <div class="side-foot">${link("tools", "Tools")}${link("settings", "Settings")}</div>`;
 }
-
-/* ---------- bagging station (top of Home): type a name, Enter, write the big SKU on the tape, repeat ---------- */
-// One photo per item: drop, paste (iPhone copy → Cmd+V) or pick it before pressing Enter and it goes on the new item.
-const STATION = { last: lsGet("mb-st-last", ""), photo: null, url: "", busy: false };
-const stBox = () => { const b = lsGet("mb-st-box", ""); return b && !boxes()[b] ? "" : b; };
-function stationHTML() {
-  const it = STATION.last && S.items[STATION.last];
-  const today0 = new Date().setHours(0, 0, 0, 0), nToday = Object.values(S.items).filter(x => (x.createdAt || 0) >= today0).length;
-  return `<section class="card station" id="station">
-    <div class="st-tape">${it ? `<span class="eyebrow">Write on the tape</span><b>${h(it.sku)}</b><span class="small muted st-nm">${h(it.name || "")}</span>`
-      : `<span class="eyebrow">Next SKU</span><b>${h(nextSku())}</b><span class="small muted">Type a name, press Enter.</span>`}</div>
-    <form class="st-form" data-station>
-      <label class="st-ph" title="Add a photo: drop, paste or click">${STATION.url ? `<img src="${h(STATION.url)}" alt="">` : `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h3l2-2.5h6L17 8h3v11H4z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" fill="none"/><circle cx="12" cy="13" r="3.4" stroke="currentColor" stroke-width="1.6" fill="none"/></svg><span>Photo</span>`}<input type="file" accept="image/*" id="stPhotoIn" hidden></label>
-      <input type="text" id="stName" placeholder="What is it?" aria-label="Item name" autocomplete="off" enterkeyhint="done" autofocus>
-      <select id="stBox" class="box-sel" data-act="noop" aria-label="Box for new items">${boxOpts(stBox(), true)}</select>
-      <button class="btn primary" type="submit">Add <kbd>↵</kbd></button>
-    </form>
-    <div class="st-foot small muted">${it ? `<span>Next <b>${h(nextSku())}</b></span>` : ""}<span>${nToday} added today</span>
-      ${it ? `<button class="linkbtn" data-act="open" data-id="${h(STATION.last)}">Open ${h(it.sku)}</button><button class="linkbtn" data-act="stUndo">Undo ${h(it.sku)}</button>` : ""}
-      <span class="st-keys">N jumps here</span></div>
-  </section>`;
-}
-function stSetPhoto(f) {
-  if (!f || !/^image\//.test(f.type)) return;
-  if (STATION.url) URL.revokeObjectURL(STATION.url);
-  STATION.photo = f; STATION.url = URL.createObjectURL(f); stRefresh();
-}
-// Redraw Home but keep what's typed in the name box: the normal render skips Home while you type in it.
-function stRefresh(focus) {
-  if (!document.getElementById("station") || S.tab !== "today") return;
-  const typed = (document.getElementById("stName") || {}).value || "", y = window.scrollY;
-  document.getElementById("main").innerHTML = '<div class="wrap">' + VIEWS.today() + "</div>"; window.scrollTo(0, y);
-  const inp = document.getElementById("stName"); inp.value = typed;
-  if (focus !== false) inp.focus();
-}
-document.addEventListener("submit", async e => {
-  const f = e.target.closest("[data-station]"); if (!f) return;
-  e.preventDefault(); if (STATION.busy) return;
-  const name = f.querySelector("#stName").value.trim(), photo = STATION.photo; if (!name && !photo) return;
-  STATION.busy = true;
-  try {
-    const id = await newItem({ name, box: f.querySelector("#stBox").value });
-    STATION.last = id; lsSet("mb-st-last", id); STATION.photo = null;
-    if (STATION.url) { URL.revokeObjectURL(STATION.url); STATION.url = ""; }
-    document.getElementById("stName").value = "";
-    if (HOME.q) HOME.q = "";
-    if (!inHomeStage(S.items[id], HOME.stage)) HOME.stage = "tolist";
-    stRefresh();
-    if (photo) { await addPhotos(id, [photo]); stRefresh(document.activeElement && document.activeElement.id === "stName"); }
-    toast("Added " + S.items[id].sku);
-  } finally { STATION.busy = false; }
-});
-document.addEventListener("change", e => {
-  const t = e.target;
-  if (t.id === "stBox") { lsSet("mb-st-box", t.value); document.getElementById("stName").focus(); }
-  if (t.id === "stPhotoIn") { stSetPhoto(t.files[0]); t.value = ""; }
-});
-document.addEventListener("paste", e => {
-  if (!document.getElementById("station")) return;
-  const f = [...(e.clipboardData || {}).files || []].find(x => /^image\//.test(x.type)); if (!f) return;
-  e.preventDefault(); stSetPhoto(f);
-});
-document.addEventListener("dragover", e => { const st = e.target.closest && e.target.closest("#station"); if (!st) return; e.preventDefault(); st.classList.add("drop"); });
-document.addEventListener("dragleave", e => { const st = e.target.closest && e.target.closest("#station"); if (st && !st.contains(e.relatedTarget)) st.classList.remove("drop"); });
-document.addEventListener("drop", e => {
-  const st = e.target.closest && e.target.closest("#station"); if (!st) return;
-  e.preventDefault(); st.classList.remove("drop"); stSetPhoto([...e.dataTransfer.files].find(x => /^image\//.test(x.type)));
-});
-// Undo the last add (mistyped name, wrong item): deletes it and gives the SKU number back so the tape sequence stays unbroken.
-document.addEventListener("click", async e => {
-  const t = e.target.closest("[data-act]"); if (!t || t.dataset.act !== "stUndo") return;
-  const id = STATION.last, it = S.items[id]; if (!it) return;
-  const photos = it.photos || []; STATION.last = ""; lsSet("mb-st-last", "");
-  await deleteItem(id); if (ASSETS) for (const p of photos) ASSETS.delete(p.id).catch(() => {});
-  const head = skuHead(), n = parseInt(String(it.sku).slice(head.length)) || 0;
-  if (String(it.sku).startsWith(head) && num(S.settings.skuNext) === n + 1) await saveSettings({ skuNext: n });
-  stRefresh(); toast("Removed " + it.sku);
-});
-document.addEventListener("keydown", e => {
-  if (e.metaKey || e.ctrlKey || e.altKey || (e.key !== "n" && e.key !== "N")) return;
-  if (/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName) || !$("#sheet").hidden || !$("#modal").hidden) return;
-  const inp = document.getElementById("stName"); if (inp) { e.preventDefault(); setTimeout(() => inp.focus()); }
-});
