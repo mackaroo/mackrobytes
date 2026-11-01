@@ -552,6 +552,7 @@ body::before, body::after { display: none; }
 .row-item .r .btn { margin-top: 4px; }
 
 /* home list: search + sort on one row */
-.home-find { display: flex; gap: 8px; }
-.home-find input { flex: 1; min-width: 0; }
+.home-find { display: flex; gap: 8px; align-items: center; justify-content: flex-end; min-width: 0; flex: 1 1 auto; }
+.home-find input { flex: 1 1 120px; max-width: 200px; min-width: 0; }
 .home-find select { flex: 0 0 auto; width: auto; }
+@media (max-width: 699px) { .home-find { flex-wrap: wrap; } .home-find input { flex-basis: 100%; max-width: none; } }

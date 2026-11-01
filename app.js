@@ -445,7 +445,7 @@ const VIEWS = {
       ${kpi(money0(listedVal), "Listed value", "homeStage", "listed")}${kpi(money0(netMonth), `Net this month · ${soldMonth.length} sold`, "tab", "profit")}
     </div>
     <div class="mob-only">${goalCardHTML()}</div>
-    <div class="mob-only">${quickAddHTML()}</div>
+    ${quickAddHTML()}
     <div class="home-grid">
       <section class="card inv">${homeInvHTML()}</section>
       <div class="home-side">

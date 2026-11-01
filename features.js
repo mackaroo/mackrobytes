@@ -544,7 +544,7 @@ document.addEventListener("click", async e => {
 
 /* ---------- home overview: every item in one list, plus the laptop sidebar ---------- */
 // Home opens on what still needs listing; listed, sold and shipped items are one tap away.
-const HOME = { stage: "tolist", q: "", sort: lsGet("mb-home-sort", "new") };
+const HOME = { stage: "tolist", q: "", find: false, sort: lsGet("mb-home-sort", "new") };
 const bySku = (a, b) => (a.sku || "").localeCompare(b.sku || "", undefined, { numeric: true });
 const HOME_SORTS = { new: ["Recently changed", (a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)], sku: ["SKU low → high", bySku], skud: ["SKU high → low", (a, b) => bySku(b, a)],
   added: ["Newest added", (a, b) => (b.createdAt || 0) - (a.createdAt || 0)], oldest: ["Oldest added", (a, b) => (a.createdAt || 0) - (b.createdAt || 0)],
@@ -571,15 +571,27 @@ function homeListHTML() {
 }
 function homeInvHTML() {
   const all = Object.values(S.items); const n = k => all.filter(it => inHomeStage(it, k)).length;
-  return `<div class="card-h"><h2>All items</h2><span class="muted small">${all.length}</span><button class="btn sm sp" data-act="tab" data-v="items">Filters & sorting</button></div>
-    <div class="home-find"><input type="search" placeholder="Search name, SKU, brand" value="${h(HOME.q)}" data-act-input="homeSearch" aria-label="Search all items">
-    <select id="homeSort" aria-label="Sort items">${Object.entries(HOME_SORTS).map(([k, [l]]) => `<option value="${k}"${HOME.sort === k ? " selected" : ""}>${l}</option>`).join("")}</select></div>
+  // Search hides behind an icon until you need it; it stays open while it holds a search.
+  const find = HOME.find || HOME.q;
+  return `<div class="card-h"><h2>All items</h2><span class="muted small">${all.length}</span>
+    <div class="home-find sp">${find ? `<input type="search" id="homeSearch" placeholder="Search SKU, name" value="${h(HOME.q)}" data-act-input="homeSearch" aria-label="Search all items">`
+      : `<button class="gear" data-act="homeFind" aria-label="Search items"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6" stroke="currentColor" stroke-width="1.8" fill="none"/><path d="M20 20l-4.5-4.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>`}
+    <select id="homeSort" aria-label="Sort items">${Object.entries(HOME_SORTS).map(([k, [l]]) => `<option value="${k}"${HOME.sort === k ? " selected" : ""}>${l}</option>`).join("")}</select>
+    <button class="btn sm" data-act="tab" data-v="items">Filters</button></div></div>
     <div class="seg">${HOME_STAGES.map(([k, l]) => `<button data-act="homeStage" data-v="${k}" aria-pressed="${HOME.stage === k}">${l}<span>${n(k)}</span></button>`).join("")}</div>
     <div class="inv-list" id="homeList">${homeListHTML()}</div>`;
 }
 document.addEventListener("click", e => {
   const t = e.target.closest("[data-act]"); if (!t || t.dataset.act !== "homeStage") return;
   HOME.stage = t.dataset.v; render();
+});
+document.addEventListener("click", e => {
+  if (!e.target.closest('[data-act="homeFind"]')) return;
+  HOME.find = true; render(); const i = document.getElementById("homeSearch"); if (i) i.focus();
+});
+document.addEventListener("focusout", e => {
+  if (e.target.id !== "homeSearch" || e.target.value) return;
+  HOME.find = false; setTimeout(render, 150);
 });
 document.addEventListener("input", e => {
   if (e.target.dataset.actInput !== "homeSearch") return;
@@ -629,8 +641,7 @@ function renderSide() {
   const el = document.getElementById("side"); if (!el || el.contains(document.activeElement)) return;
   const goal = Math.max(1, num(S.settings.weeklyGoal) || 3), n = listedThisWeek(), days = 7 - ((new Date().getDay() + 6) % 7);
   const link = (k, name) => `<button class="tab" data-act="tab" data-v="${k}" ${S.tab === k ? 'aria-current="page"' : ""}><svg viewBox="0 0 24 24" aria-hidden="true">${SIDE_ICONS[k]}</svg>${name}</button>`;
-  el.innerHTML = `<div class="side-sec"><div class="eyebrow">Quick add</div>${quickAddHTML()}</div>
-    <div class="side-sec"><div class="eyebrow">This week</div><div class="prog"><i style="width:${Math.min(100, Math.round(n / goal * 100))}%"></i></div>
+  el.innerHTML = `<div class="side-sec"><div class="eyebrow">This week</div><div class="prog"><i style="width:${Math.min(100, Math.round(n / goal * 100))}%"></i></div>
       <div class="small muted">${n} of ${goal} listed · ${days}d left</div></div>
     <div class="side-foot">${link("tools", "Tools")}${link("settings", "Settings")}</div>`;
 }
