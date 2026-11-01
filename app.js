@@ -93,34 +93,70 @@ function setSync(state, text) {
 const COLLS = ["items", "audits", "expenses", "things", "donations"];
 function persistLocal() { try { const d = { settings: S.settings }; COLLS.forEach(c => d[c] = S[c]); localStorage.setItem("mb-local", JSON.stringify(d)); } catch {} }
 const storageFull = e => /quota|exceed|too large/i.test((e && e.message) || "");
+const isConflict = e => !!(e && e.code === "23505");
 function dbErr(e) {
+  if (isConflict(e)) return "That SKU was already added on another device.";
   if (e && /JWT|auth/i.test(e.message || "")) return "You've been signed out. Reload and sign in again.";
   if (storageFull(e)) return "Storage is full. Delete old items or photos, then try again.";
   return "Couldn't save. Check your connection and try again.";
 }
-// Write one document; every collection goes through here so all devices stay in sync.
-async function putDoc(coll, id, data, quietSync) {
-  if (!DB) { persistLocal(); return; }
+// True when the last failed save hit an id that already exists (another device made it first).
+let saveConflict = false;
+// Write one document; every collection goes through here so all devices stay in sync. Resolves true once saved, false if it failed.
+// patch: merge just these fields into the saved copy, so another device's edits to other fields survive.
+// create: only write if the id is new. silentConflict: the caller retries with a new id, so no error shows.
+async function putDoc(coll, id, data, quietSync, { patch, create, silentConflict } = {}) {
+  if (!DB) { persistLocal(); return true; }
   if (!quietSync) setSync("saving");
-  try { await enqueue(coll + "/" + id, () => STORE.put(coll, id, data)); if (!quietSync) setSync("ok"); }
-  catch (e) { setSync("err"); toast(dbErr(e)); }
+  try {
+    await enqueue(coll + "/" + id, async () => {
+      if (create) return STORE.insert(coll, id, data);
+      if (!patch) return STORE.put(coll, id, data);
+      const cur = await STORE.get(coll, id);
+      // Nothing saved yet (new, or deleted on another device): write this device's full copy, not a fragment.
+      return STORE.put(coll, id, cur ? deepMerge(cur, patch) : data);
+    });
+    saveConflict = false; if (!quietSync) setSync("ok"); return true;
+  } catch (e) {
+    saveConflict = isConflict(e);
+    if (saveConflict && silentConflict) { setSync("ok"); return false; }
+    console.error("Save failed", coll, id, e); setSync("err"); toast(dbErr(e)); return false;
+  }
 }
 async function delDoc(coll, id) {
-  if (!DB) { persistLocal(); return; }
-  try { await enqueue(coll + "/" + id, () => STORE.del(coll, id)); } catch (e) { toast(dbErr(e)); }
+  if (!DB) { persistLocal(); return true; }
+  try { await enqueue(coll + "/" + id, () => STORE.del(coll, id)); return true; }
+  catch (e) { console.error("Delete failed", coll, id, e); setSync("err"); toast(dbErr(e)); return false; }
 }
+// Remove a stored photo file. Call only after the save that stops pointing at it succeeded.
+const dropPhoto = pid => { if (ASSETS && pid) ASSETS.delete(pid).catch(e => console.error("Photo delete failed", pid, e)); };
+// Resolves true once saved. If the save fails the screen goes back to what's really saved, unless a newer change replaced it meanwhile.
+// opts.create: a new item (fails if the SKU exists). opts.replace: overwrite the whole item (undo).
 async function saveItem(id, patch, opts = {}) {
   patch = { ...patch, updatedAt: Date.now() };
-  S.items[id] = opts.create ? patch : deepMerge(S.items[id], patch);
-  if (opts.quiet && S.open === id) detailSig = sig(S.items[id]);
+  const prev = S.items[id];
+  const next = S.items[id] = opts.create || opts.replace ? patch : deepMerge(prev, patch);
+  if (opts.quiet && S.open === id) detailSig = sig(next);
   renderSoon();
-  await putDoc("items", id, S.items[id]);
+  const ok = await putDoc("items", id, next, false, opts.replace ? {} : opts.create ? { create: true, silentConflict: opts.silentConflict } : { patch });
+  if (!ok && S.items[id] === next) { if (prev) S.items[id] = prev; else delete S.items[id]; renderSoon(); }
+  return ok;
 }
-async function deleteItem(id) { delete S.items[id]; renderSoon(); await delDoc("items", id); }
-async function saveSettings(patch) { S.settings = { ...S.settings, ...patch }; renderSoon(); await putDoc("settings", "profile", { ...S.settings }); }
-async function saveAudit(date, body) { S.audits[date] = body; renderSoon(); await putDoc("audits", date, body, true); }
-async function saveExpense(id, data) { S.expenses[id] = data; renderSoon(); await putDoc("expenses", id, data, true); }
-async function deleteExpense(id) { delete S.expenses[id]; renderSoon(); await delDoc("expenses", id); }
+async function deleteItem(id) {
+  const prev = S.items[id]; delete S.items[id]; renderSoon();
+  const ok = await delDoc("items", id);
+  if (!ok && prev && !S.items[id]) { S.items[id] = prev; renderSoon(); }
+  return ok;
+}
+async function saveSettings(patch) {
+  const prev = S.settings, next = S.settings = { ...S.settings, ...patch }; renderSoon();
+  const ok = await putDoc("settings", "profile", { ...next }, false, { patch });
+  if (!ok && S.settings === next) { S.settings = prev; renderSoon(); }
+  return ok;
+}
+async function saveAudit(date, body) { S.audits[date] = body; renderSoon(); return putDoc("audits", date, body, true); }
+async function saveExpense(id, data) { S.expenses[id] = data; renderSoon(); return putDoc("expenses", id, data, true); }
+async function deleteExpense(id) { delete S.expenses[id]; renderSoon(); return delDoc("expenses", id); }
 function seasonNow(d = new Date()) { const m = d.getMonth(); return m >= 2 && m <= 4 ? "spring" : m >= 5 && m <= 7 ? "summer" : m >= 8 && m <= 10 ? "fall" : "winter"; }
 function applySeason() {
   const th = ["light", "dark"].includes(S.settings.theme) ? S.settings.theme : null;
@@ -350,7 +386,7 @@ async function addPhotos(id, files) {
   if (!added.length) return;
   const it = S.items[id]; const patch = { photos: [...(it.photos || []), ...added] };
   if ((it.stage || "intake") === "intake") patch.stage = "photographed";
-  await saveItem(id, patch);
+  if (!(await saveItem(id, patch))) { added.forEach(p => dropPhoto(p.id)); return; }
   toast(added.length + " photo(s) saved" + (LOCAL ? " (preview only)" : ""));
 }
 
@@ -778,8 +814,8 @@ async function cleanupPhotos() {
   for (const [id, it] of due) {
     // Keep the photos if no thumbnail could be made (e.g. offline); try again next launch.
     const th = await makeThumb(it.photos[0]); if (!th) continue;
-    await saveItem(id, { photos: [], thumb: th, photosClearedAt: Date.now() });
-    for (const p of it.photos) ASSETS.delete(p.id).catch(() => {});
+    if (!(await saveItem(id, { photos: [], thumb: th, photosClearedAt: Date.now() }))) continue;
+    for (const p of it.photos) dropPhoto(p.id);
     n++;
   }
   if (n) toast("Cleared photos from " + n + " completed sale(s) to free up space");
@@ -941,8 +977,8 @@ async function addLabelPhoto(id, file) {
     const old = it.sale.labelPhoto;
     const lp = { id: await storePhoto(await fileToJpeg(file)), at: Date.now() };
     const shipNow = it.stage === "sold";
-    await saveItem(id, { ...(shipNow ? { stage: "shipped" } : {}), sale: { labelPhoto: lp, ...(shipNow ? { shippedAt: Date.now() } : {}) } });
-    if (old && ASSETS) ASSETS.delete(old.id).catch(() => {});
+    if (!(await saveItem(id, { ...(shipNow ? { stage: "shipped" } : {}), sale: { labelPhoto: lp, ...(shipNow ? { shippedAt: Date.now() } : {}) } }))) { dropPhoto(lp.id); return; }
+    if (old) dropPhoto(old.id);
     toast((it.sku || id) + (shipNow ? " shipped. Label saved" : " label saved"));
   } catch (e) { toast(storageFull(e) ? "Photo storage is full. Delete some old photos." : "The label photo couldn't be saved. Try again."); }
 }
@@ -965,7 +1001,7 @@ async function generateListing() {
     const patch = { listing, ai: { identified: r.identified || "", verify: Array.isArray(r.verify) ? r.verify.map(String) : [], photoTips: Array.isArray(r.photoTips) ? r.photoTips.map(String) : [], generatedAt: Date.now() } };
     if (STAGE_IDX[it.stage || "intake"] < 2) patch.stage = "drafted";
     await saveItem(id, patch);
-    toast("Listing written", { label: "Undo", fn: () => saveItem(id, prev, { create: true }) });
+    toast("Listing written", { label: "Undo", fn: () => saveItem(id, prev, { replace: true }) });
     if (st) st.innerHTML = "";
   } catch (e) { if (st) st.innerHTML = e && e.code === "cancelled" ? "" : `<p class="small neg">${h(aiMsg(e))}</p>`; if (btn) btn.disabled = false; }
 }
@@ -1030,6 +1066,18 @@ function quickSold(id, stage) {
   const it = S.items[id]; const local = it.listOn === "fblocal"; const p = local ? "fb" : LIST_PLAT[it.listOn] || "ebay";
   return saveItem(id, { stage: local ? "complete" : stage, completedAt: local ? Date.now() : null, sale: { platform: p, local, ...saleMoney(it, p, local, null), date: Date.now(), ...(stage === "shipped" && !local ? { shippedAt: Date.now() } : {}) }, plat: { [p]: { status: "ended" } } });
 }
+// Undo sale button: the item goes back to Listed on the platform it sold on and stops counting in Money.
+async function unsellItem(id, stage, dropLabel = true) {
+  const s = S.items[id].sale || {};
+  const ok = await saveItem(id, { stage, sale: null, completedAt: null, ...(s.platform && stage === "listed" ? { plat: { [s.platform]: { status: "listed" } } } : {}) });
+  if (ok && dropLabel && s.labelPhoto) dropPhoto(s.labelPhoto.id);
+  return ok;
+}
+// Moving a sold item back to To list or Listed in a stage dropdown undoes the sale too. A dropdown is easy to mis-pick, so offer Undo (the label photo is kept for that).
+async function unsellFromPicker(id, stage) {
+  const it = S.items[id], back = { stage: it.stage, sale: it.sale, completedAt: it.completedAt ?? null, plat: it.plat || {} };
+  if (await unsellItem(id, stage, false)) toast((it.sku || id) + " → " + (STAGE_IDX[stage] <= 2 ? "To list" : stageName(stage)) + ". Sale removed", { label: "Undo", fn: () => saveItem(id, back) });
+}
 async function addSalePrice() {
   const id = S.open; const it = S.items[id]; const s = it.sale;
   const price = num($("#sPrice").value); if (price == null) { toast("Enter what it sold for."); return; }
@@ -1053,7 +1101,8 @@ document.addEventListener("click", async e => {
     case "addOne": {
       const sku = $("#aSku").value.trim(); if (!sku) { toast("Enter the SKU."); break; }
       const id = skuId(sku); if (S.items[id]) { toast("That SKU already exists."); openDetail(id); break; }
-      await saveItem(id, { sku, name: $("#aName").value.trim(), box: $("#aBox").value, stage: "intake", createdAt: Date.now() }, { create: true }); useSku(sku);
+      if (!(await saveItem(id, { sku, name: $("#aName").value.trim(), box: $("#aBox").value, stage: "intake", createdAt: Date.now() }, { create: true }))) break;
+      useSku(sku);
       if (v === "stay") { $("#aSku").value = nextSku(); $("#aName").value = ""; $("#aSku").focus(); toast("Added " + sku); } else openDetail(id);
       break; }
     case "addBulk": {
@@ -1061,7 +1110,7 @@ document.addEventListener("click", async e => {
       for (const l of lines) { const parts = l.split(/\t|,/).map(x => x.trim()); const sku = parts[0]; if (!sku || /^sku$/i.test(sku)) continue;
         const id = skuId(sku); if (S.items[id]) { skip++; continue; }
         const box = parts.length > 2 ? parseBox(parts[parts.length - 1]) : null; const name = parts.slice(1, box ? -1 : undefined).join(", ");
-        await saveItem(id, { sku, name, box: box || "", stage: "intake", createdAt: Date.now() }, { create: true }); useSku(sku); n++; }
+        if (await saveItem(id, { sku, name, box: box || "", stage: "intake", createdAt: Date.now() }, { create: true })) { useSku(sku); n++; } else skip++; }
       toast("Imported " + n + " item(s)" + (skip ? ", skipped " + skip + " existing" : "")); $("#aBulk").value = ""; break; }
     case "cam": $("#camIn").click(); break;
     case "lib": $("#libIn").click(); break;
@@ -1074,9 +1123,9 @@ document.addEventListener("click", async e => {
     case "labelView": { const lp = S.open && (S.items[S.open].sale || {}).labelPhoto; if (lp) window.open(await photoFetchUrl(lp), "_blank", "noopener"); break; }
     case "shipped": saveItem(S.open, { stage: "shipped", sale: { shippedAt: Date.now() } }); break;
     case "complete": saveItem(S.open, { stage: "complete", completedAt: Date.now() }); break;
-    case "unsell": { const sp = (S.items[S.open].sale || {}).platform, lp = (S.items[S.open].sale || {}).labelPhoto; if (lp && ASSETS) ASSETS.delete(lp.id).catch(() => {}); saveItem(S.open, { stage: "listed", sale: null, completedAt: null, ...(sp ? { plat: { [sp]: { status: "listed" } } } : {}) }); break; }
+    case "unsell": unsellItem(S.open, "listed"); break;
     case "del": $("#delConfirm").innerHTML = `<span class="small">Delete this item and its data?</span> <button class="btn sm danger" data-act="delYes">Yes, delete</button>`; break;
-    case "delYes": { const id = S.open; const photos = [...(S.items[id].photos || []), ...((S.items[id].sale || {}).labelPhoto ? [S.items[id].sale.labelPhoto] : [])]; closeDetail(); await deleteItem(id); if (ASSETS) for (const p of photos) ASSETS.delete(p.id).catch(() => {}); toast("Item deleted"); break; }
+    case "delYes": { const id = S.open; const photos = [...(S.items[id].photos || []), ...((S.items[id].sale || {}).labelPhoto ? [S.items[id].sale.labelPhoto] : [])]; closeDetail(); if (!(await deleteItem(id))) break; photos.forEach(p => dropPhoto(p.id)); toast("Item deleted"); break; }
     case "bundleAI": {
       const sel = Object.keys(S.bundle.sel).filter(k => S.bundle.sel[k] && S.items[k]);
       runAI(t, "#bundleOut", `You are a reseller pricing expert.\n\n${profileText()}\n\nA buyer wants these items together on ${PLAT[S.bundle.plat]}:\n${JSON.stringify(sel.map(k => itemForAI(S.items[k], k)))}\n\nThe seller is considering ${S.bundle.pct}% off. In plain Markdown ("- " bullets, under 200 words): is that discount smart, what bundle price to counter with, how to ship them together (one box? padding?), and how to word the offer message.`); break; }
@@ -1136,7 +1185,7 @@ document.addEventListener("change", async e => {
   if (t.id === "importIn") {
     const f = t.files[0]; t.value = ""; if (!f) return;
     try { const d = JSON.parse(await f.text()); let n = 0; if (d.settings) await saveSettings(d.settings);
-      for (const [id, it] of Object.entries(d.items || {})) { if (!S.items[id]) { await saveItem(id, it, { create: true }); n++; } }
+      for (const [id, it] of Object.entries(d.items || {})) { if (!S.items[id] && await saveItem(id, it, { create: true })) n++; }
       for (const c of ["audits", "expenses", "things", "donations"]) for (const [id, x] of Object.entries(d[c] || {})) if (!S[c][id]) { S[c][id] = x; await putDoc(c, id, x, true); }
       toast("Restored " + n + " item(s). Existing SKUs were left alone."); } catch { toast("That file isn't a MackroBytes backup."); }
     return; }
@@ -1161,6 +1210,7 @@ document.addEventListener("change", async e => {
     const p = t.dataset.f; const it = S.items[S.open];
     let v = t.type === "checkbox" ? t.checked : t.dataset.num ? num(t.value) : t.value;
     let patch = pathPatch(p, v);
+    if (p === "stage" && it.sale && STAGE_IDX[v] < 4) { await unsellFromPicker(S.open, v); detailSig = ""; t.blur(); renderSoon(); return; }
     if (p === "stage" && STAGE_IDX[v] >= 4 && v !== "complete" && !it.sale) { await quickSold(S.open, v); detailSig = ""; t.blur(); renderSoon(); return; }
     if (p === "costPre") patch.cost = v == null ? null : Math.round(v * (1 + (num(S.settings.buyTaxPct) ?? 6) / 100) * 100) / 100;
     if (p === "stage" && v === "complete") patch.completedAt = Date.now();
@@ -1279,8 +1329,8 @@ async function edSave(btn) {
     const blob = await toJpeg(edRender(2400, ED.adj, false));
     const photos = [...S.items[ED.id].photos]; const old = photos[ED.i];
     photos[ED.i] = { id: await storePhoto(blob), at: Date.now() };
-    await saveItem(ED.id, { photos });
-    if (ASSETS) ASSETS.delete(old.id).catch(() => {});
+    if (!(await saveItem(ED.id, { photos }))) { dropPhoto(photos[ED.i].id); btn.disabled = false; btn.textContent = "Save"; return; }
+    dropPhoto(old.id);
     closeEditor(); toast("Photo saved");
   } catch (e) { btn.disabled = false; btn.textContent = "Save"; toast(storageFull(e) ? "Photo storage is full." : "Couldn't save the photo. Try again."); }
 }
@@ -1294,12 +1344,12 @@ async function edApplyAll(btn) {
       const blob = await toJpeg(edRender(2400, j === ED.i ? ED.adj : shared, false, bmp));
       photos[j] = { id: await storePhoto(blob), at: Date.now() }; made.push(photos[j].id);
     }
-    await saveItem(ED.id, { photos });
-    if (ASSETS) for (const o of olds) ASSETS.delete(o.id).catch(() => {});
+    if (!(await saveItem(ED.id, { photos }))) throw { code: "save_failed" };
+    olds.forEach(o => dropPhoto(o.id));
     closeEditor(); toast("Edits applied to all " + photos.length + " photos");
   } catch (e) {
     // Remove the copies already uploaded, or they'd sit in storage unused.
-    if (ASSETS) for (const m of made) ASSETS.delete(m).catch(() => {});
+    made.forEach(dropPhoto);
     btn.disabled = false; btn.textContent = "Apply to all " + photos.length + " photos"; toast(storageFull(e) ? "Photo storage is full." : "Couldn't finish. No photos were changed."); }
 }
 async function edDownload() {
@@ -1308,6 +1358,6 @@ async function edDownload() {
   downloadBlob(name, blob); toast("Saved " + name);
 }
 async function edCover() { const photos = [...S.items[ED.id].photos]; const [p] = photos.splice(ED.i, 1); photos.unshift(p); await saveItem(ED.id, { photos }); closeEditor(); toast("Cover photo set"); }
-async function edDelete() { const photos = [...S.items[ED.id].photos]; const [p] = photos.splice(ED.i, 1); await saveItem(ED.id, { photos }); if (ASSETS) ASSETS.delete(p.id).catch(() => {}); closeEditor(); toast("Photo deleted"); }
+async function edDelete() { const photos = [...S.items[ED.id].photos]; const [p] = photos.splice(ED.i, 1); if (!(await saveItem(ED.id, { photos }))) return; dropPhoto(p.id); closeEditor(); toast("Photo deleted"); }
 
 boot();

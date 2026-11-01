@@ -18,12 +18,19 @@ function useSku(sku) {
   const cur = num(S.settings.skuYear) === yy ? (num(S.settings.skuNext) || 1) : 1;
   if (n >= cur) saveSettings({ skuYear: yy, skuNext: n + 1 });
 }
+// Resolves the new item's id, or null if it couldn't be saved.
 async function newItem(fields, opts = {}) {
-  const sku = nextSku(), id = skuId(sku);
-  // Pin before saving: the save waits on the network, and the list redraws before it returns.
-  if (opts.pin) HOME.pin = [id, ...HOME.pin.filter(x => x !== id)];
-  await saveItem(id, { sku, box: "", stage: "intake", createdAt: Date.now(), ...fields }, { create: true });
-  useSku(sku); return id;
+  // If another device just took this SKU, move the counter past it and try the next one.
+  for (let tries = 0; tries < 5; tries++) {
+    const sku = nextSku(), id = skuId(sku);
+    // Pin before saving: the save waits on the network, and the list redraws before it returns.
+    if (opts.pin) HOME.pin = [id, ...HOME.pin.filter(x => x !== id)];
+    const ok = await saveItem(id, { sku, box: "", stage: "intake", createdAt: Date.now(), ...fields }, { create: true, silentConflict: true });
+    useSku(sku);
+    if (ok) return id;
+    if (!saveConflict) return null;
+  }
+  toast(dbErr({ code: "23505" })); return null;
 }
 async function quickAdd(text) {
   const name = String(text || "").trim(); if (!name) return;
@@ -36,6 +43,7 @@ async function quickAdd(text) {
   if (inv) inv.innerHTML = homeInvHTML();
   if (list) list.innerHTML = itemListHTML();
   const id = await saving;
+  if (!id) { if (inv) inv.innerHTML = homeInvHTML(); if (list) list.innerHTML = itemListHTML(); return; }
   toast("Added " + S.items[id].sku, { label: "Open", fn: () => openDetail(id) });
 }
 function quickAddHTML() {
@@ -186,7 +194,15 @@ document.addEventListener("keydown", e => {
 });
 const thingName = t => (t.name || "").trim() || "Untitled";
 const thingThumb = t => t.photo ? `<img class="thumb" src="${h(photoSrc(t.photo))}" alt="" loading="lazy">` : `<div class="thumb">${t.shot ? "#" + t.shot : "no photo"}</div>`;
-async function saveThing(id, patch) { S.things[id] = { ...(S.things[id] || {}), ...patch, updatedAt: Date.now() }; renderSoon(); if (!$("#sorter").hidden) renderSorter(); await putDoc("things", id, S.things[id], true); }
+// Saves only the changed fields (merged into the saved copy). Resolves true once saved; on failure the screen goes back.
+async function saveThing(id, patch) {
+  patch = { ...patch, updatedAt: Date.now() };
+  const prev = S.things[id], next = S.things[id] = { ...(prev || {}), ...patch };
+  renderSoon(); if (!$("#sorter").hidden) renderSorter();
+  const ok = await putDoc("things", id, next, true, { patch });
+  if (!ok && S.things[id] === next) { if (prev) S.things[id] = prev; else delete S.things[id]; renderSoon(); if (!$("#sorter").hidden) renderSorter(); }
+  return ok;
+}
 async function addThingPhotos(files) {
   if (!files.length) return; toast("Saving " + files.length + " photo(s)…"); let n = 0;
   for (const f of files) {
@@ -266,7 +282,7 @@ async function garageLog(d) {
   const name = ($("#glName") || {}).value?.trim() || "", bin = lsGet("mb-bin", ""), shot = shotNext(), now = Date.now();
   const id = "t" + now.toString(36) + Math.random().toString(36).slice(2, 6);
   const t = { name, bin, shot, decision: d === "later" ? "undecided" : d, createdAt: now, ...(d === "later" ? {} : { decidedAt: now }) };
-  if (d === "sell") t.itemId = await newItem({ name: name || `Photo #${shot}${bin ? " from " + bin : ""}`, bin, shot, condNotes: bin ? "From " + bin : "", fromThing: id });
+  if (d === "sell") { t.itemId = await newItem({ name: name || `Photo #${shot}${bin ? " from " + bin : ""}`, bin, shot, condNotes: bin ? "From " + bin : "", fromThing: id }); if (!t.itemId) return; }
   setShot(shot + 1); await saveThing(id, t);
   toast(`#${shot} ${name || "logged"}: ${d === "later" ? "decide later" : DEC[d].label}`, { label: "Undo", fn: async () => {
     delete S.things[id]; renderSoon(); await delDoc("things", id); if (t.itemId) await deleteItem(t.itemId); setShot(shot); render(); } });
@@ -370,6 +386,7 @@ async function sellThing() {
   const { id } = SORT.pending, t = S.things[id], r = worthCalc();
   const itemId = await newItem({ name: t.name || "Untitled item", stage: t.photo ? "photographed" : "intake", photos: t.photo ? [t.photo] : [],
     ...(r ? { weightOz: r.oz } : {}), condNotes: t.bin ? "From " + t.bin : "", fromThing: id });
+  if (!itemId) return;
   await commit(id, { decision: "sell", itemId, value: r ? r.price : t.value || null });
   toast("Added " + S.items[itemId].sku + " to Items", { label: "Open", fn: () => { closeSorter(); openDetail(itemId); } });
 }
@@ -440,7 +457,9 @@ document.addEventListener("click", async e => {
     case "donSave": saveDonation(); break;
     case "thingOpen": modal(thingSheetHTML(id)); break;
     case "thingDel": $("#thDel").innerHTML = `<span class="small">Delete this for good?</span> <button class="btn sm danger" data-act="thingDelYes" data-id="${h(id)}">Yes, delete</button>`; break;
-    case "thingDelYes": { const th = S.things[id]; delete S.things[id]; $("#modal").hidden = true; renderSoon(); await delDoc("things", id); if (th && th.photo && !th.itemId && ASSETS) ASSETS.delete(th.photo.id).catch(() => {}); break; }
+    case "thingDelYes": { const th = S.things[id]; delete S.things[id]; $("#modal").hidden = true; renderSoon();
+      if (!(await delDoc("things", id))) { if (th && !S.things[id]) { S.things[id] = th; renderSoon(); } break; }
+      if (th && th.photo && !th.itemId) dropPhoto(th.photo.id); break; }
     case "csvDon": { const rows = [["Date", "Place", "Item", "Value"]]; Object.values(S.donations).sort((x, y) => (x.date || "").localeCompare(y.date || "")).forEach(d => (d.items || []).forEach(x => rows.push([d.date, d.place, x.name, x.value]))); saveFile("donations-" + today() + ".csv", csv(rows), "text/csv"); break; }
   }
 });
@@ -544,7 +563,7 @@ document.addEventListener("click", async e => {
   switch (t.dataset.act) {
     case "pcClear": PC.q = ""; PC.res = null; lsSet("mb-pc", "{}"); render(); break;
     case "pcAdd": { const r = PC.res; if (!r) break;
-      const id = await newItem({ name: r.identified || r.q, box: r.fragile ? "fragile" : "", priceCheck: r, ...pcItemPatch(r) });
+      const id = await newItem({ name: r.identified || r.q, box: r.fragile ? "fragile" : "", priceCheck: r, ...pcItemPatch(r) }); if (!id) break;
       PC.q = ""; PC.res = null; lsSet("mb-pc", "{}");
       toast("Added " + S.items[id].sku, { label: "Open", fn: () => openDetail(id) }); break; }
     case "pcItem": { const it = S.open && S.items[S.open]; if (!it) break;
@@ -618,6 +637,7 @@ document.addEventListener("change", e => {
 // Change an item's stage right from the home list without opening it.
 document.addEventListener("change", e => {
   const t = e.target, id = t.dataset && t.dataset.qstage; if (!id || !S.items[id]) return;
+  if (S.items[id].sale && STAGE_IDX[t.value] < 4) { unsellFromPicker(id, t.value); t.blur(); return; }
   if (STAGE_IDX[t.value] >= 4 && t.value !== "complete" && !S.items[id].sale) { quickSold(id, t.value); t.blur(); toast((S.items[id].sku || id) + " → " + stageName(t.value) + ". Add the price any time."); return; }
   saveItem(id, { stage: t.value, ...(t.value === "complete" ? { completedAt: Date.now() } : {}) }); t.blur();
   toast((S.items[id].sku || id) + " → " + (STAGE_IDX[t.value] <= 2 ? "To list" : stageName(t.value)));
