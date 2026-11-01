@@ -18,18 +18,24 @@ function useSku(sku) {
   const cur = num(S.settings.skuYear) === yy ? (num(S.settings.skuNext) || 1) : 1;
   if (n >= cur) saveSettings({ skuYear: yy, skuNext: n + 1 });
 }
-async function newItem(fields) {
+async function newItem(fields, opts = {}) {
   const sku = nextSku(), id = skuId(sku);
+  // Pin before saving: the save waits on the network, and the list redraws before it returns.
+  if (opts.pin) HOME.pin = [id, ...HOME.pin.filter(x => x !== id)];
   await saveItem(id, { sku, box: "", stage: "intake", createdAt: Date.now(), ...fields }, { create: true });
   useSku(sku); return id;
 }
 async function quickAdd(text) {
   const name = String(text || "").trim(); if (!name) return;
-  const id = await newItem({ name });
   // Keep it at the top of the home list whatever the sort, and make sure the list can show it.
-  HOME.pin = [id, ...HOME.pin.filter(x => x !== id)];
-  if (!inHomeStage(S.items[id], HOME.stage)) HOME.stage = "tolist";
-  HOME.q = ""; HOME.find = false; render();
+  if (HOME.stage !== "all" && HOME.stage !== "tolist") HOME.stage = "tolist";
+  HOME.q = ""; HOME.find = false;
+  const saving = newItem({ name }, { pin: true });
+  // The item is in S.items now, but render() skips #main while the quick add box has focus, so redraw the lists directly.
+  const inv = document.querySelector(".card.inv"), list = document.getElementById("itemList");
+  if (inv) inv.innerHTML = homeInvHTML();
+  if (list) list.innerHTML = itemListHTML();
+  const id = await saving;
   toast("Added " + S.items[id].sku, { label: "Open", fn: () => openDetail(id) });
 }
 function quickAddHTML() {
@@ -549,10 +555,10 @@ document.addEventListener("click", async e => {
 /* ---------- home overview: every item in one list, plus the laptop sidebar ---------- */
 // Home opens on what still needs listing; listed, sold and shipped items are one tap away.
 // pin: items quick-added this session, shown first until the sort changes.
-const HOME = { stage: "tolist", q: "", find: false, sort: lsGet("mb-home-sort", "new"), pin: [] };
+const HOME = { stage: "tolist", q: "", find: false, sort: lsGet("mb-home-sort2", "added"), pin: [] };
 const bySku = (a, b) => (a.sku || "").localeCompare(b.sku || "", undefined, { numeric: true });
-const HOME_SORTS = { new: ["Recently changed", (a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)], sku: ["SKU low → high", bySku], skud: ["SKU high → low", (a, b) => bySku(b, a)],
-  added: ["Newest added", (a, b) => (b.createdAt || 0) - (a.createdAt || 0)], oldest: ["Oldest added", (a, b) => (a.createdAt || 0) - (b.createdAt || 0)],
+const HOME_SORTS = { added: ["Newest added", (a, b) => (b.createdAt || 0) - (a.createdAt || 0)], new: ["Recently changed", (a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)],
+  sku: ["SKU low → high", bySku], skud: ["SKU high → low", (a, b) => bySku(b, a)], oldest: ["Oldest added", (a, b) => (a.createdAt || 0) - (b.createdAt || 0)],
   box: ["Box", (a, b) => boxName(a.box || "").localeCompare(boxName(b.box || "")) || bySku(a, b)] };
 const HOME_STAGES = [["tolist", "Unlisted"], ["listed", "Listed"], ["sold", "Sold"], ["done", "Shipped & done"], ["info", "Needs info"], ["all", "All"]];
 // Unsold items missing details: same checks as the "Needs attention" rules for photos, listing text, price check and weight.
@@ -566,7 +572,7 @@ function homeListHTML() {
   const q = HOME.q.toLowerCase();
   const rows = Object.entries(S.items).filter(([id, it]) => inHomeStage(it, HOME.stage) &&
     (!q || [id, it.sku, it.name, it.brand, it.model, it.official].join(" ").toLowerCase().includes(q)))
-    .sort((a, b) => (HOME_SORTS[HOME.sort] || HOME_SORTS.new)[1](a[1], b[1]));
+    .sort((a, b) => (HOME_SORTS[HOME.sort] || HOME_SORTS.added)[1](a[1], b[1]));
   const pin = id => { const i = HOME.pin.indexOf(id); return i < 0 ? 1e9 : i; };
   rows.sort((a, b) => pin(a[0]) - pin(b[0]));
   if (!rows.length) return `<div class="empty"><b>${Object.keys(S.items).length ? "Nothing here." : "No items yet."}</b></div>`;
@@ -606,7 +612,7 @@ document.addEventListener("input", e => {
 });
 document.addEventListener("change", e => {
   if (e.target.id !== "homeSort") return;
-  HOME.sort = e.target.value; HOME.pin = []; lsSet("mb-home-sort", HOME.sort); e.target.blur();
+  HOME.sort = e.target.value; HOME.pin = []; lsSet("mb-home-sort2", HOME.sort); e.target.blur();
   const l = document.getElementById("homeList"); if (l) l.innerHTML = homeListHTML();
 });
 // Change an item's stage right from the home list without opening it.
