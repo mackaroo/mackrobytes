@@ -544,7 +544,11 @@ document.addEventListener("click", async e => {
 
 /* ---------- home overview: every item in one list, plus the laptop sidebar ---------- */
 // Home opens on what still needs listing; listed, sold and shipped items are one tap away.
-const HOME = { stage: "tolist", q: "" };
+const HOME = { stage: "tolist", q: "", sort: lsGet("mb-home-sort", "new") };
+const bySku = (a, b) => (a.sku || "").localeCompare(b.sku || "", undefined, { numeric: true });
+const HOME_SORTS = { new: ["Recently changed", (a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)], sku: ["SKU low → high", bySku], skud: ["SKU high → low", (a, b) => bySku(b, a)],
+  added: ["Newest added", (a, b) => (b.createdAt || 0) - (a.createdAt || 0)], oldest: ["Oldest added", (a, b) => (a.createdAt || 0) - (b.createdAt || 0)],
+  box: ["Box", (a, b) => boxName(a.box || "").localeCompare(boxName(b.box || "")) || bySku(a, b)] };
 const HOME_STAGES = [["tolist", "Unlisted"], ["listed", "Listed"], ["sold", "Sold"], ["done", "Shipped & done"], ["info", "Needs info"], ["all", "All"]];
 // Unsold items missing details: same checks as the "Needs attention" rules for photos, listing text, price check and weight.
 function needsInfo(it) {
@@ -557,7 +561,7 @@ function homeListHTML() {
   const q = HOME.q.toLowerCase();
   const rows = Object.entries(S.items).filter(([id, it]) => inHomeStage(it, HOME.stage) &&
     (!q || [id, it.sku, it.name, it.brand, it.model, it.official].join(" ").toLowerCase().includes(q)))
-    .sort((a, b) => (b[1].updatedAt || 0) - (a[1].updatedAt || 0));
+    .sort((a, b) => (HOME_SORTS[HOME.sort] || HOME_SORTS.new)[1](a[1], b[1]));
   if (!rows.length) return `<div class="empty"><b>${Object.keys(S.items).length ? "Nothing here." : "No items yet."}</b></div>`;
   // Just photo, SKU, box and stage. The name shows only until there's a photo to recognize the item by.
   return rows.map(([id, it]) => `<div class="inv-row" role="button" tabindex="0" data-act="open" data-id="${h(id)}">${thumb(it)}
@@ -568,7 +572,8 @@ function homeListHTML() {
 function homeInvHTML() {
   const all = Object.values(S.items); const n = k => all.filter(it => inHomeStage(it, k)).length;
   return `<div class="card-h"><h2>All items</h2><span class="muted small">${all.length}</span><button class="btn sm sp" data-act="tab" data-v="items">Filters & sorting</button></div>
-    <input type="search" placeholder="Search name, SKU, brand" value="${h(HOME.q)}" data-act-input="homeSearch" aria-label="Search all items">
+    <div class="home-find"><input type="search" placeholder="Search name, SKU, brand" value="${h(HOME.q)}" data-act-input="homeSearch" aria-label="Search all items">
+    <select id="homeSort" aria-label="Sort items">${Object.entries(HOME_SORTS).map(([k, [l]]) => `<option value="${k}"${HOME.sort === k ? " selected" : ""}>${l}</option>`).join("")}</select></div>
     <div class="seg">${HOME_STAGES.map(([k, l]) => `<button data-act="homeStage" data-v="${k}" aria-pressed="${HOME.stage === k}">${l}<span>${n(k)}</span></button>`).join("")}</div>
     <div class="inv-list" id="homeList">${homeListHTML()}</div>`;
 }
@@ -579,6 +584,11 @@ document.addEventListener("click", e => {
 document.addEventListener("input", e => {
   if (e.target.dataset.actInput !== "homeSearch") return;
   HOME.q = e.target.value; const l = document.getElementById("homeList"); if (l) l.innerHTML = homeListHTML();
+});
+document.addEventListener("change", e => {
+  if (e.target.id !== "homeSort") return;
+  HOME.sort = e.target.value; lsSet("mb-home-sort", HOME.sort); e.target.blur();
+  const l = document.getElementById("homeList"); if (l) l.innerHTML = homeListHTML();
 });
 // Change an item's stage right from the home list without opening it.
 document.addEventListener("change", e => {
