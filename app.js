@@ -407,6 +407,8 @@ function itemListHTML() {
     hi: (a, b) => (mainPrice(b) ?? -1) - (mainPrice(a) ?? -1), lo: (a, b) => (mainPrice(a) ?? 1e9) - (mainPrice(b) ?? 1e9),
     name: (a, b) => (a.name || "").localeCompare(b.name || ""), sku: (a, b) => (a.sku || "").localeCompare(b.sku || "", undefined, { numeric: true }), shot: (a, b) => (a.shot ?? 1e9) - (b.shot ?? 1e9) }[F.sort] || ((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
   rows.sort((a, b) => by(a[1], b[1]));
+  const pin = id => { const i = HOME.pin.indexOf(id); return i < 0 ? 1e9 : i; };
+  rows.sort((a, b) => pin(a[0]) - pin(b[0]));
   return rows.length ? `<div class="list">${rows.map(([id, it]) => itemRow(id, it)).join("")}</div>` :
     `<div class="empty"><b>${Object.keys(S.items).length ? "No matches." : "No items yet."}</b><button class="btn primary" data-act="tab" data-v="add">Add items</button></div>`;
 }

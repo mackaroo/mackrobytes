@@ -26,6 +26,10 @@ async function newItem(fields) {
 async function quickAdd(text) {
   const name = String(text || "").trim(); if (!name) return;
   const id = await newItem({ name });
+  // Keep it at the top of the home list whatever the sort, and make sure the list can show it.
+  HOME.pin = [id, ...HOME.pin.filter(x => x !== id)];
+  if (!inHomeStage(S.items[id], HOME.stage)) HOME.stage = "tolist";
+  HOME.q = ""; HOME.find = false; render();
   toast("Added " + S.items[id].sku, { label: "Open", fn: () => openDetail(id) });
 }
 function quickAddHTML() {
@@ -544,7 +548,8 @@ document.addEventListener("click", async e => {
 
 /* ---------- home overview: every item in one list, plus the laptop sidebar ---------- */
 // Home opens on what still needs listing; listed, sold and shipped items are one tap away.
-const HOME = { stage: "tolist", q: "", find: false, sort: lsGet("mb-home-sort", "new") };
+// pin: items quick-added this session, shown first until the sort changes.
+const HOME = { stage: "tolist", q: "", find: false, sort: lsGet("mb-home-sort", "new"), pin: [] };
 const bySku = (a, b) => (a.sku || "").localeCompare(b.sku || "", undefined, { numeric: true });
 const HOME_SORTS = { new: ["Recently changed", (a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)], sku: ["SKU low → high", bySku], skud: ["SKU high → low", (a, b) => bySku(b, a)],
   added: ["Newest added", (a, b) => (b.createdAt || 0) - (a.createdAt || 0)], oldest: ["Oldest added", (a, b) => (a.createdAt || 0) - (b.createdAt || 0)],
@@ -562,6 +567,8 @@ function homeListHTML() {
   const rows = Object.entries(S.items).filter(([id, it]) => inHomeStage(it, HOME.stage) &&
     (!q || [id, it.sku, it.name, it.brand, it.model, it.official].join(" ").toLowerCase().includes(q)))
     .sort((a, b) => (HOME_SORTS[HOME.sort] || HOME_SORTS.new)[1](a[1], b[1]));
+  const pin = id => { const i = HOME.pin.indexOf(id); return i < 0 ? 1e9 : i; };
+  rows.sort((a, b) => pin(a[0]) - pin(b[0]));
   if (!rows.length) return `<div class="empty"><b>${Object.keys(S.items).length ? "Nothing here." : "No items yet."}</b></div>`;
   // Just photo, SKU, box and stage. The name shows only until there's a photo to recognize the item by.
   return rows.map(([id, it]) => `<div class="inv-row" role="button" tabindex="0" data-act="open" data-id="${h(id)}">${thumb(it)}
@@ -599,7 +606,7 @@ document.addEventListener("input", e => {
 });
 document.addEventListener("change", e => {
   if (e.target.id !== "homeSort") return;
-  HOME.sort = e.target.value; lsSet("mb-home-sort", HOME.sort); e.target.blur();
+  HOME.sort = e.target.value; HOME.pin = []; lsSet("mb-home-sort", HOME.sort); e.target.blur();
   const l = document.getElementById("homeList"); if (l) l.innerHTML = homeListHTML();
 });
 // Change an item's stage right from the home list without opening it.
