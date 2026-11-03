@@ -3,11 +3,10 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#A7B3F2" media="(prefers-color-scheme: light)">
-  <meta name="theme-color" content="#1D1B3C" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#f6f7f8" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0f1215" media="(prefers-color-scheme: dark)">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="MackroBytes">
   <title>MackroBytes</title>
   <link rel="manifest" href="manifest.webmanifest">
@@ -20,35 +19,38 @@
 </head>
 <body>
 <section id="login" class="center-screen" hidden>
-  <form id="loginForm" class="card" autocomplete="on">
-    <div class="hello">Hello.</div>
-    <p class="muted small" style="margin:0">Sign in to MackroBytes. You only do this once per device.</p>
+  <form id="loginForm" class="login" autocomplete="on">
+    <h2>Sign in to MackroBytes</h2>
     <label class="f">Email<input id="loginEmail" type="email" autocomplete="username" required></label>
     <label class="f">Password<input id="loginPw" type="password" autocomplete="current-password" required></label>
     <button class="btn primary" type="submit">Sign in</button>
-    <p id="loginErr" class="small" style="color:var(--bad);margin:0" hidden></p>
+    <p id="loginErr" class="err" hidden></p>
   </form>
 </section>
 
-<header class="top"><div class="wrap">
-  <div class="brand">MackroBytes</div>
-  <div class="sync" id="sync"><span class="dot"></span><span>Connecting…</span></div>
-  <button class="gear" id="toolsBtn" data-act="tab" data-v="tools" aria-label="Seller tools"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 6.5a4 4 0 0 1-5 5L5 16a1.8 1.8 0 0 0 2.5 2.5l4.5-4.5a4 4 0 0 1 5-5l-2.4 2.4-2.1-.4-.4-2.1z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" fill="none"/></svg></button>
-  <button class="gear" id="gear" data-act="tab" data-v="settings" aria-label="Settings"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.6" fill="none"/><path d="M12 2.8v3M12 18.2v3M2.8 12h3M18.2 12h3M5.5 5.5l2.1 2.1M16.4 16.4l2.1 2.1M5.5 18.5l2.1-2.1M16.4 7.6l2.1-2.1" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
-</div></header>
-<main id="main"><div class="wrap"><div class="empty">Loading your inventory…</div></div></main>
-<nav class="tabs" aria-label="Sections"><div class="row" id="tabs"></div><div class="side" id="side"></div></nav>
-<div id="sheet" hidden></div>
-<div id="sorter" class="sorter" hidden></div>
-<div id="editor" hidden></div>
-<div id="modal" class="modal" hidden></div>
-<div id="toast" class="toast" hidden></div>
-<input type="file" id="camIn" accept="image/*" capture="environment" hidden>
-<input type="file" id="libIn" accept="image/*" multiple hidden>
-<input type="file" id="labelIn" accept="image/*" hidden>
-<input type="file" id="thingCam" accept="image/*" capture="environment" hidden>
-<input type="file" id="thingLib" accept="image/*" multiple hidden>
-<input type="file" id="importIn" accept="application/json,.json" hidden>
+<div class="wrap">
+  <header class="top">
+    <div class="brand">MackroBytes</div>
+    <span class="note" id="previewNote" hidden>Preview: changes stay in this browser</span>
+    <span class="err" id="syncErr" hidden>Sync stopped. Reload the app.</span>
+    <button class="gear" data-act="settings" aria-label="Settings"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.6" fill="none"/><path d="M12 2.8v3M12 18.2v3M2.8 12h3M18.2 12h3M5.5 5.5l2.1 2.1M16.4 16.4l2.1 2.1M5.5 18.5l2.1-2.1M16.4 7.6l2.1-2.1" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
+  </header>
+  <section class="summary">
+    <div><div class="label">Your payouts</div><div class="main" id="payouts">$0.00</div></div>
+    <div class="side"><div>Buyers paid <span id="paidTotal">$0.00</span></div><div id="estNote"></div></div>
+  </section>
+  <div class="tools">
+    <input id="search" type="search" placeholder="Search SKU or name" autocomplete="off" aria-label="Search SKU or name">
+    <button class="btn" data-act="add">Add item</button>
+    <button class="btn primary" data-act="sale">Record sale</button>
+  </div>
+  <nav class="tabbar" id="tabs" aria-label="Status"></nav>
+  <main id="list"><div class="empty">Loading your shop…</div></main>
+</div>
+
+<div id="scrim" hidden><aside id="panel"></aside></div>
+<div id="toast" class="toast" role="status" hidden></div>
+<input type="file" id="fileIn" accept="image/*,.heic,.heif" multiple hidden>
 
 <script src="config.js"></script>
 <script>
@@ -57,7 +59,6 @@
     document.write('<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.0/dist/umd/supabase.js" integrity="sha384-xPW3QHswsICVC2mW6BFNwMbhpLkbZ133fKOhxNx3QGGgAOJfL3O9t8r2aWn1aez6" crossorigin="anonymous"><\/script><script src="store.js"><\/script>');
   }
 </script>
-<script src="features.js"></script>
 <script src="app.js"></script>
 <script>if ("serviceWorker" in navigator && location.protocol === "https:") navigator.serviceWorker.register("sw.js").catch(() => {});</script>
 </body>

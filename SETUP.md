@@ -1,8 +1,8 @@
 # MackroBytes setup
 
-MackroBytes is one app for decluttering, listing and selling. It replaced Garage Sort, Declutter & Sell, and the MackroBytes Studio artifact; their 41 items and photos were imported on 2026-10-30.
+MackroBytes tracks items by SKU, finds the right item from a sale receipt, and totals payouts.
 
-It's plain HTML/CSS/JS with no build step. It's hosted free on GitHub Pages, and Supabase (also free) holds the database, your login and your photos. Changes sync live between your iPhone, Mac and Windows PC.
+It's plain HTML/CSS/JS with no build step. It's hosted free on GitHub Pages, and Supabase (also free) holds the database, your login and your photos. Changes sync live between your devices.
 
 Setup takes about 20 minutes, once.
 
@@ -29,25 +29,14 @@ The anon key is safe to publish. The database refuses anyone who isn't signed in
 You sign in once per device. After that, everything stays in sync.
 
 ## Getting around
-- **Bottom bar:** Home, Items, **+** (Add), Sort, Money. Swipe left or right anywhere on a page to move to the next tab.
-- **Top right:** 🔧 opens seller Tools (fees, offers, messages, bundles, shipping, growth tips, Ask Claude). ⚙ opens Settings, where you set your name, weekly goal, SKU numbering, fees, theme and backups.
-- **Items:** tap an item to open it. Swipe right from the left edge of the screen to close it.
-- **Sort:** snap or pick photos of a pile, then tap **Start sorting**. Swipe each card: **right = Keep, left = Donate, up = Sell, down = Trash**. You can also use the buttons for Storage and Ask first. On a computer, the arrow keys work too.
-  - **Sell** runs a "worth selling?" check first, using real fees and shipping. If it's worth it, the thing becomes an item in Items with the next SKU and its photo.
-  - **Keep / Storage** asks where it's going, so **Where is it?** can find it later.
-  - **Ask first** holds things that are Mom's or Dad's call until they answer.
-  - **Donate pile → Log a drop-off** saves the date, place and values for taxes. The yearly total shows on the Money tab.
-
-## AI features (free, copy & paste)
-**Write my listing**, **Look it up**, **Daily audit**, **Ask Claude** and the other AI buttons all work the same way:
-1. The app shows a prompt. Tap **Copy prompt**.
-2. Paste it into the Claude app. When you're writing a listing, attach the item's photos too.
-3. Copy Claude's whole reply, paste it back into the app, and tap **Use this reply**.
-
-For lookups, Claude searches the web for the official title, brand, model and so on. It only fills in fields that are blank.
+- **Add item:** drag in photos, enter a name, pick a box, and get the SKU to write on the bag.
+- **Mark listed:** enter the price and where it's listed.
+- **Record sale:** enter what the buyer paid, pick the item, and enter your payout. The app shows which box to pull it from.
+- **Click any row** to change its details, undo a sale, or delete it.
 
 ## Good to know
 - Free Supabase projects **pause after 7 days with no use**. If the app stops loading, open the Supabase dashboard and click **Restore project**.
 - Photos are resized before upload. The free tier (1 GB) holds several thousand photos.
-- **Settings → Backup** saves a JSON copy of everything except photos.
+- **Settings → Save backup file** saves a JSON copy of everything except photos.
+- iPhone HEIC photos can't be read in Chrome. Use JPEG or PNG files.
 - Updates are pushed to the GitHub repo automatically after each Claude Code session. Devices pick up the new version the next time they open it.
