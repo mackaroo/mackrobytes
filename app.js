@@ -66,7 +66,7 @@ function conversionReport(olds, items) {
 }
 
 /* ---------- data ---------- */
-const S = { items: {}, meta: {}, tab: "listed", q: "", loaded: false };
+const S = { items: {}, meta: {}, tab: "all", q: "", loaded: false };
 let DB = false;
 const queues = {};
 const enqueue = (key, fn) => { const p = (queues[key] || Promise.resolve()).then(fn, fn); queues[key] = p.catch(() => {}); return p; };
@@ -189,7 +189,7 @@ function rowRight(it) {
 }
 function rowSub(it) {
   const parts = [h(boxName(it))];
-  if (S.q) parts.push(h(STATUSES[it.status]));
+  if (S.q || S.tab === "all") parts.push(h(STATUSES[it.status]));
   if (it.status === "sold") parts.push(it.payout == null ? "Needs payout" : `Paid ${money(it.paid)} · ${it.payoutEstimated ? "Estimated payout" : "Payout"} ${money(it.payout)}`);
   return parts.join(" · ");
 }
@@ -204,9 +204,10 @@ function renderList() {
   if (!S.loaded) return;
   renderSummary();
   const all = Object.values(S.items);
-  $("#tabs").innerHTML = Object.keys(STATUSES).map(k => `<button class="tab${S.tab === k && !S.q ? " on" : ""}" data-act="tab" data-v="${k}">${STATUSES[k]} <span>${all.filter(i => i.status === k).length}</span></button>`).join("");
+  const tabBtn = (k, label, n) => `<button class="tab${S.tab === k && !S.q ? " on" : ""}" data-act="tab" data-v="${k}">${label} <span>${n}</span></button>`;
+  $("#tabs").innerHTML = tabBtn("all", "All", all.length) + Object.keys(STATUSES).map(k => tabBtn(k, STATUSES[k], all.filter(i => i.status === k).length)).join("");
   const needle = S.q.trim().toLowerCase();
-  const rows = (needle ? all.filter(i => (i.sku + " " + i.name).toLowerCase().includes(needle)) : all.filter(i => i.status === S.tab)).sort(newestFirst);
+  const rows = (needle ? all.filter(i => (i.sku + " " + i.name).toLowerCase().includes(needle)) : all.filter(i => S.tab === "all" || i.status === S.tab)).sort(newestFirst);
   $("#list").innerHTML = rows.length ? rows.map(it => `<div class="row" data-act="openItem" data-id="${h(it.sku)}">${thumb(it)}<div class="grow">${titleLine(it)}<div class="sub">${rowSub(it)}</div></div><div class="right">${rowRight(it)}</div></div>`).join("") : `<div class="empty">${needle ? "No items match that." : "No items here."}</div>`;
 }
 
