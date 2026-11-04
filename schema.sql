@@ -1,6 +1,6 @@
 -- MackroBytes: run this once in Supabase → SQL Editor → New query → Run.
--- Everything (items, settings, expenses, sorting, donations) lives in one
--- table of JSON documents, grouped by collection name.
+-- Everything (items and shop settings) lives in one table of JSON documents,
+-- grouped by collection name.
 
 create table if not exists public.docs (
   coll        text not null,

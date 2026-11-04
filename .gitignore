@@ -1,0 +1,16 @@
+# The repo is public, so only the app's own files may enter it. Backups and everything else stay local.
+*
+!/.gitignore
+!/index.html
+!/app.js
+!/store.js
+!/config.js
+!/sw.js
+!/style.css
+!/manifest.webmanifest
+!/icon.svg
+!/icon-180.png
+!/icon-192.png
+!/icon-512.png
+!/SETUP.md
+!/schema.sql

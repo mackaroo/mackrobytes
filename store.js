@@ -28,14 +28,6 @@ const STORE = {
     const { error } = await sb.from("docs").insert({ coll, id, data, updated_at: new Date().toISOString() });
     if (error) throw error;
   },
-  // Every row in a collection, once, with no live updates.
-  async all(coll) {
-    const rows = []; let from = 0;
-    for (;;) {
-      const { data, error } = await sb.from("docs").select("id,data").eq("coll", coll).range(from, from + 999);
-      if (error) throw error; rows.push(...data); if (data.length < 1000) return rows; from += 1000;
-    }
-  },
   async del(coll, id) {
     const { error } = await sb.from("docs").delete().eq("coll", coll).eq("id", id);
     if (error) throw error;

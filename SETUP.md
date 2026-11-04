@@ -31,12 +31,14 @@ You sign in once per device. After that, everything stays in sync.
 ## Getting around
 - **Add item:** drag in photos, enter a name, pick a box, and get the SKU to write on the bag.
 - **Mark listed:** enter the price and where it's listed.
-- **Record sale:** enter what the buyer paid, pick the item, and enter your payout. The app shows which box to pull it from.
-- **Click any row** to change its details, undo a sale, or delete it.
+- **Record sale:** enter what it sold for, pick the item, and enter your total payout. The app shows which box to pull it from.
+- **Click a status pill** on a row to change its status.
+- **Click any row** to change its details or delete it. Moving a sold item back to an earlier status undoes the sale.
 
 ## Good to know
 - Free Supabase projects **pause after 7 days with no use**. If the app stops loading, open the Supabase dashboard and click **Restore project**.
 - Photos are resized before upload. The free tier (1 GB) holds several thousand photos.
 - **Settings → Save backup file** saves a JSON copy of everything except photos.
 - iPhone HEIC photos can't be read in Chrome. Use JPEG or PNG files.
-- Updates are pushed to the GitHub repo automatically after each Claude Code session. Devices pick up the new version the next time they open it.
+- Only the app's own files go to the public GitHub repo; `.gitignore` lists them. A new app file has to be added there first.
+- Bug fixes go live when Claude pushes them, and new features wait until you say "push". Devices pick up the new version the next time they open it.
