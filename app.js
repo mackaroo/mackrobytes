@@ -17,6 +17,16 @@ function parseMoney(v) {
 const BOXES = { fragile: "Fragile", hobby: "Hobby & Tech", soft: "Soft & Collectibles" };
 const PLATFORMS = { depop: "Depop", ebay: "eBay", fb: "Facebook" };
 const STATUSES = { tolist: "To list", listed: "Listed", sold: "Sold", shipped: "Shipped" };
+// <input type="date"> values are local calendar days. soldAt is stored in ms at local noon so the day can't shift across time zones.
+const pad2 = n => String(n).padStart(2, "0");
+const dayValue = d => d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate());
+const today = () => dayValue(new Date());
+const dayToMs = v => { const [y, m, d] = v.split("-").map(Number); return new Date(y, m - 1, d, 12).getTime(); };
+function soldDay(v) {
+  if (!v) return "";
+  if (typeof v === "string" && /^\d{4}-\d{2}-\d{2}/.test(v)) return v.slice(0, 10);
+  const d = new Date(v); return Number.isNaN(d.getTime()) ? "" : dayValue(d);
+}
 const newestFirst = (a, b) => String(b.sku).localeCompare(String(a.sku), undefined, { numeric: true });
 
 function toast(msg, { err = false } = {}) {
@@ -120,7 +130,7 @@ async function addNewItem(fields) {
   for (let tries = 0; tries < 5; tries++) {
     const { yy, head, n } = nextSkuNumber(), num = n + bump, sku = head + String(num).padStart(4, "0");
     const now = Date.now();
-    const item = { sku, photos: [], driveUrl: "", status: "tolist", price: null, platform: null, paid: null, payout: null, payoutEstimated: false, createdAt: now, updatedAt: now, listedAt: null, soldAt: null, shippedAt: null, ...fields };
+    const item = { sku, photos: [], driveUrl: "", status: "tolist", price: null, platform: null, paid: null, payout: null, payoutEstimated: false, buyer: null, createdAt: now, updatedAt: now, listedAt: null, soldAt: null, shippedAt: null, ...fields };
     try { await createItem(sku, item); saveMeta({ skuYear: yy, skuNext: num + 1 }); renderList(); return sku; }
     catch (e) { if (e && e.code === "23505") { bump++; continue; } throw e; }
   }
@@ -190,7 +200,7 @@ function rowRight(it) {
 function rowSub(it) {
   const parts = [h(boxName(it))];
   if (S.q || S.tab === "all") parts.push(h(STATUSES[it.status]));
-  if (it.status === "sold") parts.push(it.payout == null ? "Needs payout" : `Paid ${money(it.paid)} · ${it.payoutEstimated ? "Estimated payout" : "Payout"} ${money(it.payout)}`);
+  if (it.status === "sold") parts.push(it.payout == null ? "Needs payout" : `Sold for ${money(it.paid)} · ${it.payoutEstimated ? "Estimated payout" : "Payout"} ${money(it.payout)}`);
   return parts.join(" · ");
 }
 function renderSummary() {
@@ -217,6 +227,7 @@ function openPanel(p) { panel = p; drawPanel(); $("#scrim").hidden = false; cons
 function closePanel() { panel = null; $("#scrim").hidden = true; $("#panel").innerHTML = ""; }
 function drawPanel() {
   const views = { add: addView, created: createdView, list: listView, salePick: salePickView, salePay: salePayView, saleDone: saleDoneView, item: itemView, confirm: confirmView, settings: settingsView };
+  $("#panel").classList.toggle("pop", panel.view === "salePay");
   $("#panel").innerHTML = `<button class="x" data-act="close" aria-label="Close">×</button>` + views[panel.view]();
 }
 const fieldErr = (id, msg) => { const e = $("#" + id); if (e) { e.textContent = msg || ""; e.hidden = !msg; } };
@@ -300,28 +311,33 @@ function matchesHtml() {
     (panel.showToList ? "" : `<button type="button" class="link" data-act="saleToList">Show To list items too</button>`);
 }
 function salePickView() {
-  return `<h2>Record sale</h2><label class="f">What the buyer paid<input id="salePaid" inputmode="decimal" autocomplete="off" placeholder="14.99" value="${h(panel.paid || "")}" autofocus></label><div id="matches">${matchesHtml()}</div>`;
+  return `<h2>Record sale</h2><label class="f">Sold for<input id="salePaid" inputmode="decimal" autocomplete="off" placeholder="14.99" value="${h(panel.paid || "")}" autofocus></label><div id="matches">${matchesHtml()}</div>`;
 }
 function salePayView() {
   const it = S.items[panel.id];
-  return `<h2>Record sale</h2><div class="row flat">${thumb(it)}<div class="grow">${titleLine(it)}<div class="sub">${h(boxName(it))}</div></div></div><form data-form="sale">
-    <label class="f">Buyer paid<input id="payPaid" inputmode="decimal" autocomplete="off" value="${h(panel.paid || "")}" ${panel.paid ? "" : "autofocus"}></label>
-    <label class="f">Your payout from the receipt<input id="payOut" inputmode="decimal" autocomplete="off" placeholder="12.70" ${panel.paid ? "autofocus" : ""}></label>
+  return `<h2>Mark sold</h2><div class="row flat">${thumb(it)}<div class="grow">${titleLine(it)}<div class="sub">${h(boxName(it))}</div></div></div><form data-form="sale">
+    <label class="f">Sold for<input id="payPaid" inputmode="decimal" autocomplete="off" value="${h(panel.paid || "")}" ${panel.paid ? "" : "autofocus"}></label>
+    <label class="f">Total payout<input id="payOut" inputmode="decimal" autocomplete="off" placeholder="12.70" ${panel.paid ? "autofocus" : ""}></label>
+    <label class="f">Buyer username<input id="payBuyer" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
+    <label class="f">Sale date<input id="payDate" type="date" max="${today()}" value="${today()}"></label>
     <p class="err" id="payErr" hidden></p>
-    <div class="btns"><button class="btn primary" type="submit">Save sale</button>${panel.back ? `<button type="button" class="btn" data-act="saleBack">Back</button>` : ""}</div></form>`;
+    <div class="btns"><button class="btn primary" type="submit">Mark sold</button>${panel.back ? `<button type="button" class="btn" data-act="saleBack">Back</button>` : ""}</div></form>`;
 }
 async function submitSale() {
   const paid = parseMoney($("#payPaid").value), payout = parseMoney($("#payOut").value);
-  if (paid == null) return fieldErr("payErr", "Enter what the buyer paid first.");
-  if (payout == null) return fieldErr("payErr", "Enter your payout first.");
-  if (payout > paid) return fieldErr("payErr", "Your payout is more than the buyer paid. Check both numbers.");
-  const id = panel.id;
-  if (await patchItem(id, { status: "sold", paid, payout, payoutEstimated: false, soldAt: Date.now() })) { S.q = ""; $("#search").value = ""; S.tab = "sold"; renderList(); openPanel({ view: "saleDone", id }); }
+  if (paid == null) return fieldErr("payErr", "Enter what it sold for first.");
+  if (payout == null) return fieldErr("payErr", "Enter the total payout first.");
+  if (payout > paid) return fieldErr("payErr", "The total payout is more than it sold for. Check both numbers.");
+  const day = $("#payDate").value;
+  if (!day) return fieldErr("payErr", "Pick the sale date first.");
+  if (day > today()) return fieldErr("payErr", "The sale date can't be in the future.");
+  const id = panel.id, buyer = $("#payBuyer").value.trim() || null;
+  if (await patchItem(id, { status: "sold", paid, payout, payoutEstimated: false, buyer, soldAt: dayToMs(day) })) { S.q = ""; $("#search").value = ""; S.tab = "sold"; renderList(); openPanel({ view: "saleDone", id }); }
 }
 function saleDoneView() {
   const it = S.items[panel.id];
   return `<p class="muted">Sold. Pull this one from</p><div class="bigbox">${h(boxName(it))}</div><div class="done-photo">${thumb(it, "big")}</div><div class="bigsku">${h(it.sku)}</div><p class="name">${h(it.name)}</p>
-    <p class="muted">Buyer paid ${money(it.paid)} · Your payout ${money(it.payout)}</p><div class="btns"><button class="btn primary" data-act="close" autofocus>Done</button></div>`;
+    <p class="muted">Sold for ${money(it.paid)} · Total payout ${money(it.payout)}</p><div class="btns"><button class="btn primary" data-act="close" autofocus>Done</button></div>`;
 }
 
 /* Item page */
@@ -330,7 +346,7 @@ function itemView() {
   const id = h(it.sku), sold = isSold(it);
   const actions = {
     tolist: `<button class="btn primary" data-act="openList" data-id="${id}">Mark listed</button>`,
-    listed: `<button class="btn primary" data-act="saleFromItem" data-id="${id}">Record sale</button><button class="btn" data-act="unlist" data-id="${id}">Move to To list</button>`,
+    listed: `<button class="btn primary" data-act="saleFromItem" data-id="${id}">Mark sold</button><button class="btn" data-act="unlist" data-id="${id}">Move to To list</button>`,
     sold: `<button class="btn primary" data-act="ship" data-id="${id}">Mark shipped</button><button class="btn" data-act="askUndoSale" data-id="${id}">Undo sale</button>`,
     shipped: `<button class="btn" data-act="unship" data-id="${id}">Move back to Sold</button>`
   }[it.status];
@@ -341,7 +357,7 @@ function itemView() {
     <label class="f">Name<input data-field="name" autocomplete="off" value="${h(it.name)}"></label>
     <div class="f">Box${chips("itemBox", BOXES, it.box)}</div>
     ${it.status === "tolist" ? "" : `<label class="f">Listed price<input data-field="price" inputmode="decimal" autocomplete="off" value="${it.price != null ? h(it.price) : ""}"></label><div class="f">Where${chips("itemPlatform", PLATFORMS, it.platform)}</div>`}
-    ${sold ? `<label class="f">Buyer paid<input data-field="paid" inputmode="decimal" autocomplete="off" value="${it.paid != null ? h(it.paid) : ""}"></label><label class="f">Your payout${it.payoutEstimated ? ' <span class="flag">Estimated</span>' : ""}<input data-field="payout" inputmode="decimal" autocomplete="off" value="${it.payout != null ? h(it.payout) : ""}"></label>` : ""}
+    ${sold ? `<label class="f">Sold for<input data-field="paid" inputmode="decimal" autocomplete="off" value="${it.paid != null ? h(it.paid) : ""}"></label><label class="f">Total payout${it.payoutEstimated ? ' <span class="flag">Estimated</span>' : ""}<input data-field="payout" inputmode="decimal" autocomplete="off" value="${it.payout != null ? h(it.payout) : ""}"></label><label class="f">Buyer username<input data-field="buyer" autocomplete="off" autocapitalize="off" spellcheck="false" value="${h(it.buyer || "")}"></label><label class="f">Sale date<input data-field="soldAt" type="date" max="${today()}" value="${h(soldDay(it.soldAt))}"></label>` : ""}
     <p class="err" id="itemErr" hidden></p>
     <div class="btns">${actions}</div>
     <button class="link danger" data-act="askDelete" data-id="${id}">Delete item</button>`;
@@ -358,6 +374,17 @@ async function saveField(input) {
     const v = input.value.trim();
     if (!v) { input.value = it.name; return fieldErr("itemErr", "An item needs a name."); }
     if (v !== it.name) patchItem(id, { name: v });
+    return;
+  }
+  if (field === "buyer") {
+    const v = input.value.trim() || null;
+    if (v !== (it.buyer || null)) patchItem(id, { buyer: v });
+    return;
+  }
+  if (field === "soldAt") {
+    const day = input.value;
+    if (day > today()) { input.value = soldDay(it.soldAt); return fieldErr("itemErr", "The sale date can't be in the future, so it wasn't saved."); }
+    if (day !== soldDay(it.soldAt)) patchItem(id, { soldAt: day ? dayToMs(day) : null });
     return;
   }
   const blank = input.value.trim() === "", v = blank ? null : parseMoney(input.value);
@@ -407,7 +434,7 @@ const actions = {
   ship: async t => { const id = t.dataset.id; if (await patchItem(id, { status: "shipped", shippedAt: Date.now() })) { if (panel && panel.view === "item") openItem(id); toast(id + " shipped"); } },
   unship: async t => { const id = t.dataset.id; if (await patchItem(id, { status: "sold", shippedAt: null })) openItem(id); },
   unlist: async t => { const id = t.dataset.id; if (await patchItem(id, { status: "tolist", listedAt: null })) openItem(id); },
-  askUndoSale: t => { const id = t.dataset.id; askConfirm("Undo this sale?", "Undo sale", async () => { await patchItem(id, { status: "listed", paid: null, payout: null, payoutEstimated: false, soldAt: null, shippedAt: null }); openItem(id); }, () => openItem(id)); },
+  askUndoSale: t => { const id = t.dataset.id; askConfirm("Undo this sale?", "Undo sale", async () => { await patchItem(id, { status: "listed", paid: null, payout: null, payoutEstimated: false, buyer: null, soldAt: null, shippedAt: null }); openItem(id); }, () => openItem(id)); },
   askDelete: t => { const id = t.dataset.id; askConfirm("Delete " + id + "?", "Delete item", async () => {
     const photos = (S.items[id].photos || []).map(p => p.id);
     if (await removeItem(id)) { closePanel(); toast(id + " deleted"); deleteStoredPhotos(photos); } else openItem(id);
@@ -424,6 +451,7 @@ const actions = {
 };
 document.addEventListener("click", e => {
   if (e.target.id === "scrim") return closePanel();
+  if (e.target.type === "date") return e.target.showPicker();
   const t = e.target.closest("[data-act]"); if (!t) return;
   const fn = actions[t.dataset.act]; if (fn) fn(t);
 });
@@ -438,7 +466,7 @@ document.addEventListener("input", e => {
   if (id === "salePaid") { panel.paid = e.target.value; $("#matches").innerHTML = matchesHtml(); }
   if (id === "listPrice") { fieldErr("listErr", ""); checkDuplicatePrice(); }
   if (id === "addName") { panel.name = e.target.value; fieldErr("addErr", ""); }
-  if (id === "payPaid" || id === "payOut") fieldErr("payErr", "");
+  if (id === "payPaid" || id === "payOut" || id === "payDate") fieldErr("payErr", "");
 });
 document.addEventListener("change", e => {
   if (e.target.dataset.field && panel && panel.view === "item") saveField(e.target);

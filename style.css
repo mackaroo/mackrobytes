@@ -74,6 +74,7 @@ input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 
 #scrim { position: fixed; inset: 0; background: rgba(0, 0, 0, .45); z-index: 10; }
 #panel { position: absolute; top: 0; right: 0; bottom: 0; width: min(480px, 100%); background: var(--card); padding: 22px; overflow-y: auto; }
+#panel.pop { top: 50%; right: auto; bottom: auto; left: 50%; transform: translate(-50%, -50%); width: min(440px, calc(100% - 32px)); max-height: calc(100% - 32px); border-radius: 14px; }
 .x { position: absolute; top: 14px; right: 14px; width: 32px; height: 32px; border: 0; background: none; font-size: 24px; line-height: 1; color: var(--muted); cursor: pointer; border-radius: 8px; z-index: 1; }
 .x:hover { background: var(--line); }
 .f { display: block; margin-top: 14px; font-size: 13px; font-weight: 600; color: var(--muted); }
