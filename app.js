@@ -229,6 +229,7 @@ const titleLine = it => `<div class="title"><span class="sku">${h(it.sku)}</span
 const boxName = it => BOXES[it.box] || "No box";
 const isSold = it => SOLD_STATUSES.includes(it.status);
 const flag = t => `<span class="flag">${h(t)}</span>`;
+const bundlePartners = it => it.bundleId ? Object.values(S.items).filter(i => i.bundleId === it.bundleId && i.sku !== it.sku).sort(newestFirst) : [];
 
 function statusPill(it) {
   const day = it.status === "listed" ? soldDay(it.listedAt) : "";
@@ -238,7 +239,7 @@ function statusPill(it) {
 function rowSub(it) {
   const parts = [h(boxName(it))];
   if (it.status === "listed") parts.push(it.price == null ? flag("Needs price") : `${money(it.price)} · ${h(platformNames(it) || "No platform")}`);
-  if (isSold(it)) parts.push(it.payout == null ? flag("Needs payout") : `${it.paid == null ? flag("Needs sold price") : "Sold for " + money(it.paid)} · ${it.payoutEstimated ? "Estimated payout" : "Payout"} ${money(it.payout)}`);
+  if (isSold(it)) parts.push(it.payout == null ? flag("Needs payout") : `${it.paid == null ? flag("Needs sold price") : "Sold for " + money(it.paid)} · ${it.payoutEstimated ? "Estimated payout" : "Payout"} ${money(it.payout)}${bundlePartners(it).length ? " · Bundle" : ""}`);
   return parts.join(" · ");
 }
 function renderSummary() {
@@ -381,28 +382,95 @@ function salePickView() {
 }
 function salePayView() {
   const it = S.items[panel.id], paid = panel.paid || (it.paid != null ? it.paid : "");
-  return `<h2>Mark sold</h2><div class="row flat">${thumb(it)}<div class="grow">${titleLine(it)}<div class="sub">${h(boxName(it))}</div></div></div><form data-form="sale">
+  return `<h2>${panel.keep ? "Log as bundle" : "Mark sold"}</h2><div class="row flat">${thumb(it)}<div class="grow">${titleLine(it)}<div class="sub">${h(boxName(it))}</div></div></div><form data-form="sale">
     <label class="f">Sold for<input id="payPaid" inputmode="decimal" autocomplete="off" value="${h(paid)}" ${paid !== "" ? "" : "autofocus"}></label>
+    <div id="bundleBox">${bundleHtml()}</div>
     <label class="f">Total payout<input id="payOut" inputmode="decimal" autocomplete="off" placeholder="12.70" value="${it.payout != null ? h(it.payout) : ""}" ${paid !== "" ? "autofocus" : ""}></label>
+    <p class="muted" id="bundleSplit" hidden></p>
     <label class="f">Buyer username<input id="payBuyer" autocomplete="off" autocapitalize="off" spellcheck="false" value="${h(it.buyer || "")}"></label>
     <label class="f">Sale date<input id="payDate" type="date" max="${today()}" value="${h(soldDay(it.soldAt) || today())}"></label>
     ${slotHtml("receipt")}
     <label class="f">Tracking number<input id="payTracking" autocomplete="off" autocapitalize="off" spellcheck="false" value="${h(it.tracking || "")}"></label>
     ${slotHtml("label")}
     <p class="err" id="payErr" hidden></p>
-    <div class="btns"><button class="btn primary" type="submit">Mark sold</button>${panel.back ? `<button type="button" class="btn" data-act="saleBack">Back</button>` : ""}</div></form>`;
+    <div class="btns"><button class="btn primary" type="submit">${panel.keep ? "Save bundle" : "Mark sold"}</button>${panel.back ? `<button type="button" class="btn" data-act="saleBack">Back</button>` : ""}</div></form>`;
+}
+/* Bundles: one buyer, one Depop payout, several SKUs */
+// Splits by each item's share of the sale, in whole cents, so the shares always add up to the payout on the receipt.
+function splitPayout(payout, amounts) {
+  const cents = amounts.map(a => Math.round(a * 100)), sum = cents.reduce((a, c) => a + c, 0), total = Math.round(payout * 100);
+  if (!sum) return amounts.map(() => 0);
+  const exact = cents.map(c => total * c / sum), out = exact.map(Math.floor);
+  let left = total - out.reduce((a, c) => a + c, 0);
+  exact.map((v, i) => [v - out[i], i]).sort((a, b) => b[0] - a[0]).forEach(([, i]) => { if (left > 0) { out[i]++; left--; } });
+  return out.map(c => c / 100);
+}
+const saleBundle = () => (panel.bundle || []).filter(sku => S.items[sku]);
+function bundleMatchesHtml() {
+  const it = S.items[panel.id], chosen = saleBundle(), needle = (panel.bundleQ || "").trim().toLowerCase();
+  // Items still needing a sale logged come first. Items already in another bundle can't be picked.
+  const open = i => i.status === "listed" || (isSold(i) && i.payout == null);
+  const pool = Object.values(S.items).filter(i => i.sku !== it.sku && !chosen.includes(i.sku) && !i.bundleId && (i.sku + " " + i.name).toLowerCase().includes(needle))
+    .sort((a, b) => open(b) - open(a) || newestFirst(a, b)).slice(0, 6);
+  return pool.map(i => `<div class="row" data-act="bundleAdd" data-id="${h(i.sku)}">${thumb(i)}<div class="grow">${titleLine(i)}<div class="sub">${h(STATUSES[i.status])}</div></div><div class="amt"><b>${i.price == null ? "No price" : money(i.price)}</b></div></div>`).join("") || `<div class="empty">No items match that.</div>`;
+}
+function bundleHtml() {
+  const it = S.items[panel.id];
+  if (it.bundleId && it.bundleId !== panel.bundleId) return "";
+  const rows = saleBundle().map(sku => { const b = S.items[sku];
+    return `<div class="bundle-item">${titleLine(b)}<label class="f">Sold for<input data-bundle-paid="${h(sku)}" inputmode="decimal" autocomplete="off" placeholder="${b.price == null ? "" : "Listed " + money(b.price)}" value="${h(panel.bundlePaid[sku] != null ? panel.bundlePaid[sku] : "")}"></label><button type="button" class="link danger" data-act="bundleDrop" data-id="${h(sku)}">Remove</button></div>`;
+  }).join("");
+  return rows + (panel.bundlePicking
+    ? `<label class="f">Find the bundled item<input id="bundleSearch" autocomplete="off" placeholder="SKU or name" value="${h(panel.bundleQ || "")}"></label><div id="bundleMatches">${bundleMatchesHtml()}</div>`
+    : `<button type="button" class="link" data-act="bundlePick">Add bundled item</button>`);
+}
+function showBundleSplit() {
+  const e = $("#bundleSplit"); if (!e) return;
+  const ids = saleBundle(), amounts = [$("#payPaid").value, ...ids.map(sku => panel.bundlePaid[sku])].map(parseMoney), payout = parseMoney($("#payOut").value);
+  const ready = ids.length && payout != null && !amounts.includes(null);
+  e.hidden = !ready;
+  if (ready) { const shares = splitPayout(payout, amounts); e.textContent = [panel.id, ...ids].map((sku, i) => sku + " " + money(shares[i])).join(" · "); }
+}
+function drawBundle() { $("#bundleBox").innerHTML = bundleHtml(); showBundleSplit(); }
+// Images stay on the first SKU only, so removing one item's copy can't delete another's. Saving again after a failure repeats the same values.
+async function saveBundle(id, ids, amounts, payout, shared, status) {
+  const p = panel, go = $("#panel button[type=submit]"), shares = splitPayout(payout, amounts);
+  p.bundleId = p.bundleId || id + "-" + Date.now();
+  const common = { ...shared, bundleId: p.bundleId, payoutEstimated: false };
+  go.disabled = true;
+  const main = await patchWithRecords(id, { ...common, paid: amounts[0], payout: shares[0], ...(p.keep ? {} : { status, shippedAt: null }) }, p.drafts || {});
+  if (!main) { go.disabled = false; return false; }
+  p.drafts = {};
+  const saved = await Promise.all(ids.map((sku, i) => { const b = S.items[sku];
+    if (!b) return false;
+    return patchItem(sku, { ...common, buyer: shared.buyer || b.buyer || null, tracking: shared.tracking || b.tracking || null, paid: amounts[i + 1], payout: shares[i + 1], ...(isSold(b) ? {} : { status, shippedAt: null }) });
+  }));
+  go.disabled = false;
+  const failed = ids.filter((sku, i) => !saved[i]);
+  if (failed.length) { if (panel === p) fieldErr("payErr", "Couldn't save " + failed.join(", ") + ". Press the button again to retry."); return false; }
+  return panel === p;
 }
 async function submitSale() {
-  const paid = parseMoney($("#payPaid").value), payout = parseMoney($("#payOut").value);
+  const paid = parseMoney($("#payPaid").value), payout = parseMoney($("#payOut").value), bundle = saleBundle(), bundlePaid = bundle.map(sku => parseMoney(panel.bundlePaid[sku]));
   if (paid == null) return fieldErr("payErr", "Enter what it sold for first.");
+  if (bundlePaid.includes(null)) return fieldErr("payErr", "Enter what each bundled item sold for first.");
+  if (panel.keep && !bundle.length) return fieldErr("payErr", "Add the other item in the bundle first.");
+  const amounts = [paid, ...bundlePaid], totalPaid = amounts.reduce((a, v) => a + Math.round(v * 100), 0) / 100;
   if (payout == null) return fieldErr("payErr", "Enter the total payout first.");
-  if (payout > paid) return fieldErr("payErr", "The total payout is more than it sold for. Check both numbers.");
+  if (payout > totalPaid) return fieldErr("payErr", "The total payout is more than it sold for. Check both numbers.");
   const day = $("#payDate").value;
   if (!day) return fieldErr("payErr", "Pick the sale date first.");
   if (day > today()) return fieldErr("payErr", "The sale date can't be in the future.");
   const id = panel.id, it = S.items[id], buyer = $("#payBuyer").value.trim() || null, tracking = $("#payTracking").value.trim() || null;
   // Heading to Shipped goes through the Shipped popup. Closing that leaves the item in Sold & Packing.
   const target = panel.target || "sold", status = target === "shipped" ? "sold" : target, stay = panel.stay;
+  if (bundle.length) {
+    const keep = panel.keep;
+    if (!await saveBundle(id, bundle, amounts, payout, { buyer, tracking, soldAt: dayToMs(day) }, status)) return;
+    if (keep) { openItem(id); return toast("Bundle saved"); }
+    if (!stay) { S.q = ""; $("#search").value = ""; S.tab = status; renderList(); }
+    return openPanel(target === "shipped" ? { view: "ship", id } : { view: "saleDone", id, bundleTotal: { paid: totalPaid, payout } });
+  }
   const payoutEstimated = !!(it && it.payoutEstimated) && payout === it.payout;
   if (await savePopup({ status, paid, payout, payoutEstimated, buyer, tracking, soldAt: dayToMs(day), shippedAt: null })) {
     if (!stay) { S.q = ""; $("#search").value = ""; S.tab = status; renderList(); }
@@ -410,15 +478,16 @@ async function submitSale() {
   }
 }
 function saleDoneView() {
-  const it = S.items[panel.id];
+  const it = S.items[panel.id], total = panel.bundleTotal, also = total ? bundlePartners(it) : [];
   return `<p class="muted">Sold. Pull this one from</p><div class="bigbox">${h(boxName(it))}</div><div class="done-photo">${thumb(it, "big")}</div><div class="bigsku">${h(it.sku)}</div><p class="name">${h(it.name)}</p>
-    <p class="muted">Sold for ${money(it.paid)} · Total payout ${money(it.payout)}</p><div class="btns"><button class="btn primary" data-act="close" autofocus>Done</button></div>`;
+    ${also.length ? `<p class="muted">Also pull</p>${also.map(b => `<div class="row flat">${thumb(b)}<div class="grow">${titleLine(b)}<div class="sub">${h(boxName(b))}</div></div></div>`).join("")}` : ""}<p class="muted">Sold for ${money(total ? total.paid : it.paid)} · Total payout ${money(total ? total.payout : it.payout)}</p><div class="btns"><button class="btn primary" data-act="close" autofocus>Done</button></div>`;
 }
 
 /* Mark shipped */
 function shipView() {
   const it = S.items[panel.id];
-  return `<h2>Mark shipped</h2><div class="row flat">${thumb(it)}<div class="grow">${titleLine(it)}<div class="sub">${h(boxName(it))}</div></div></div><form data-form="ship">
+  const also = bundlePartners(it).filter(b => b.status !== "shipped");
+  return `<h2>Mark shipped</h2><div class="row flat">${thumb(it)}<div class="grow">${titleLine(it)}<div class="sub">${h(boxName(it))}</div></div></div>${also.length ? `<p class="muted">Also ships ${also.map(b => h(b.sku)).join(", ")}</p>` : ""}<form data-form="ship">
     <label class="f">Ship date<input id="shipDate" type="datetime-local" value="${timeValue()}"></label>
     <label class="f">Tracking number<input id="shipTracking" autocomplete="off" autocapitalize="off" spellcheck="false" value="${h(it.tracking || "")}" autofocus></label>
     ${slotHtml("proof")}
@@ -429,13 +498,17 @@ async function submitShip() {
   const shippedAt = parseTime($("#shipDate").value);
   if (shippedAt == null) return fieldErr("shipErr", "Pick the ship date first.");
   if (shippedAt > Date.now()) return fieldErr("shipErr", "The ship date can't be in the future.");
-  const id = panel.id, back = panel.back;
-  if (await savePopup({ status: "shipped", shippedAt, tracking: $("#shipTracking").value.trim() || null })) { if (back) openItem(id); else closePanel(); toast(id + " is shipped"); }
+  const id = panel.id, back = panel.back, tracking = $("#shipTracking").value.trim() || null, also = bundlePartners(S.items[id]).filter(b => b.status !== "shipped");
+  if (!await savePopup({ status: "shipped", shippedAt, tracking })) return;
+  // patchItem shows its own error for any bundled item that fails.
+  await Promise.all(also.map(b => patchItem(b.sku, { status: "shipped", shippedAt, tracking: tracking || b.tracking || null })));
+  if (back) openItem(id); else closePanel();
+  toast(id + (also.length ? " and its bundle are shipped" : " is shipped"));
 }
 
 /* Item page */
 function itemView() {
-  const it = S.items[panel.id], id = h(it.sku), sold = isSold(it);
+  const it = S.items[panel.id], id = h(it.sku), sold = isSold(it), partners = bundlePartners(it);
   return `<div class="sku">${id}</div>
     <div class="f status">Status<div class="chips">${Object.keys(STATUSES).map(k => `<button type="button" class="chip${it.status === k ? " on" : ""}" data-act="setStatus" data-v="${k}">${h(STATUSES[k])}</button>`).join("")}</div></div>
     <div id="photoStrip">${photoStripHtml(it)}</div>
@@ -444,7 +517,7 @@ function itemView() {
     <label class="f">Name<input data-field="name" autocomplete="off" value="${h(it.name)}"></label>
     <div class="f">Box${chips("itemBox", BOXES, it.box)}</div>
     ${NOT_LISTED.includes(it.status) ? "" : `<label class="f">Listed price<input data-field="price" inputmode="decimal" autocomplete="off" value="${it.price != null ? h(it.price) : ""}"></label><div class="f">Platforms${platformChecks(platformsOf(it))}</div><div class="f">Boosted listing${chips("itemBoost", YES_NO, it.boosted ? "yes" : "no")}</div><label class="f">Listed date<input data-field="listedAt" type="datetime-local" value="${it.listedAt ? timeValue(it.listedAt) : ""}"></label>`}
-    ${sold ? `<label class="f">Sold for<input data-field="paid" inputmode="decimal" autocomplete="off" value="${it.paid != null ? h(it.paid) : ""}"></label><label class="f">Total payout${it.payoutEstimated ? ' <span class="flag" data-est>Estimated</span>' : ""}<input data-field="payout" inputmode="decimal" autocomplete="off" value="${it.payout != null ? h(it.payout) : ""}"></label>${it.payoutEstimated ? '<button type="button" class="link" data-est data-act="confirmPayout">Payout is correct</button>' : ""}<label class="f">Buyer username<input data-field="buyer" autocomplete="off" autocapitalize="off" spellcheck="false" value="${h(it.buyer || "")}"></label><label class="f">Sale date<input data-field="soldAt" type="date" max="${today()}" value="${h(soldDay(it.soldAt))}"></label><label class="f">Tracking number<input data-field="tracking" autocomplete="off" autocapitalize="off" spellcheck="false" value="${h(it.tracking || "")}"></label>${it.status === "shipped" ? `<label class="f">Ship date<input data-field="shippedAt" type="datetime-local" value="${it.shippedAt ? timeValue(it.shippedAt) : ""}"></label>` : ""}` : ""}
+    ${sold ? `<label class="f">Sold for<input data-field="paid" inputmode="decimal" autocomplete="off" value="${it.paid != null ? h(it.paid) : ""}"></label><label class="f">${partners.length ? "Payout share" : "Total payout"}${it.payoutEstimated ? ' <span class="flag" data-est>Estimated</span>' : ""}<input data-field="payout" inputmode="decimal" autocomplete="off" value="${it.payout != null ? h(it.payout) : ""}"></label>${it.payoutEstimated ? '<button type="button" class="link" data-est data-act="confirmPayout">Payout is correct</button>' : ""}<label class="f">Buyer username<input data-field="buyer" autocomplete="off" autocapitalize="off" spellcheck="false" value="${h(it.buyer || "")}"></label><label class="f">Sale date<input data-field="soldAt" type="date" max="${today()}" value="${h(soldDay(it.soldAt))}"></label><label class="f">Tracking number<input data-field="tracking" autocomplete="off" autocapitalize="off" spellcheck="false" value="${h(it.tracking || "")}"></label>${it.status === "shipped" ? `<label class="f">Ship date<input data-field="shippedAt" type="datetime-local" value="${it.shippedAt ? timeValue(it.shippedAt) : ""}"></label>` : ""}${partners.length ? `<div class="f">Bundled with<div class="bundle-links">${partners.map(b => `<button type="button" class="link" data-act="openItem" data-id="${h(b.sku)}">${h(b.sku)}</button>`).join("")}</div></div>` : `<button type="button" class="link" data-act="logBundle">Log as bundle</button>`}` : ""}
     ${sold || recordIds(it).length ? Object.keys(RECORDS).map(slotHtml).join("") : ""}
     <p class="err" id="itemErr" hidden></p>
     <button class="link danger" data-act="askDelete" data-id="${id}">Delete item</button>`;
@@ -525,15 +598,19 @@ async function changeStatus(id, to) {
   if (to === "sold" || (toSold && !wasSold)) return openPanel({ view: "salePay", id, target: to, stay: true });
   if (to === "shipped") return openPanel({ view: "ship", id, back: inDrawer });
   if (to === "listed" && !wasSold) return openPanel({ view: "list", id, platform: it.platform || "depop", stay: true });
-  if (wasSold && !toSold) return askConfirm("Undo this sale?", "Undo sale", async () => {
-    const ok = await patchItem(id, { status: to, paid: null, payout: null, payoutEstimated: false, buyer: null, tracking: null, soldAt: null, shippedAt: null, ...(to === "listed" ? {} : { listedAt: null }) });
+  const partners = bundlePartners(it);
+  if (wasSold && !toSold) return askConfirm(partners.length ? `Undo this sale? ${partners.map(b => b.sku).join(", ")} stays sold with its share.` : "Undo this sale?", "Undo sale", async () => {
+    const ok = await patchItem(id, { status: to, paid: null, payout: null, payoutEstimated: false, bundleId: null, buyer: null, tracking: null, soldAt: null, shippedAt: null, ...(to === "listed" ? {} : { listedAt: null }) });
     if (ok && to === "listed") return openPanel({ view: "list", id, platform: it.platform || "depop", stay: true });
     after();
   }, after);
   const patch = { status: to };
   if (toSold) patch.shippedAt = null;
   else if (it.status === "listed") patch.listedAt = null;
-  if (await patchItem(id, patch) && inDrawer) openItem(id);
+  const ok = await patchItem(id, patch);
+  // A bundle leaves together: one item going to dropoff takes the others that are still packing.
+  if (ok && to === "dropoff") await Promise.all(partners.filter(b => b.status === "sold").map(b => patchItem(b.sku, { status: "dropoff" })));
+  if (ok && inDrawer) openItem(id);
 }
 const openItem = id => openPanel({ view: "item", id });
 const actions = {
@@ -556,6 +633,15 @@ const actions = {
   salePick: t => { panel = { view: "salePay", id: t.dataset.id, paid: panel.paid, back: { paid: panel.paid, showToList: panel.showToList } }; openPanel(panel); },
   saleBack: () => openPanel({ view: "salePick", ...panel.back }),
   saleToList: () => { panel.showToList = true; $("#matches").innerHTML = matchesHtml(); },
+  logBundle: () => openPanel({ view: "salePay", id: panel.id, keep: true, bundle: [], bundlePaid: {}, bundlePicking: true }),
+  bundlePick: () => { panel.bundlePicking = true; drawBundle(); $("#bundleSearch").focus(); },
+  bundleAdd: t => {
+    const sku = t.dataset.id, b = S.items[sku];
+    panel.bundle = [...saleBundle(), sku]; panel.bundlePaid = { ...panel.bundlePaid, [sku]: b && b.paid != null ? b.paid : "" }; panel.bundlePicking = false; panel.bundleQ = "";
+    drawBundle(); fieldErr("payErr", "");
+    const input = $$("[data-bundle-paid]").find(i => i.dataset.bundlePaid === sku); if (input) input.focus();
+  },
+  bundleDrop: t => { panel.bundle = saleBundle().filter(sku => sku !== t.dataset.id); drawBundle(); },
   setStatus: t => changeStatus(panel.id, t.dataset.v),
   confirmPayout: async () => { if (await patchItem(panel.id, { payoutEstimated: false })) clearEstimated(); },
   statusMenu: openStatusMenu,
@@ -599,6 +685,8 @@ document.addEventListener("click", e => {
   const fn = actions[t.dataset.act]; if (fn) fn(t);
 });
 document.addEventListener("keydown", e => {
+  // Enter in the bundle search picks the top match instead of submitting the sale.
+  if (e.key === "Enter" && e.target.id === "bundleSearch") { e.preventDefault(); const top = $("#bundleMatches [data-act='bundleAdd']"); if (top) top.click(); return; }
   if (e.key !== "Escape") return;
   if (statusMenuOpen()) { closeStatusMenu(); focusPill($("#statusMenu").dataset.id); }
   else if (panel) {
@@ -622,6 +710,9 @@ document.addEventListener("input", e => {
   if (id === "listDate") fieldErr("listErr", "");
   if (id === "shipDate") fieldErr("shipErr", "");
   if (id === "payPaid" || id === "payOut" || id === "payDate") fieldErr("payErr", "");
+  if (id === "bundleSearch") { panel.bundleQ = e.target.value; $("#bundleMatches").innerHTML = bundleMatchesHtml(); }
+  if (e.target.dataset.bundlePaid) { panel.bundlePaid[e.target.dataset.bundlePaid] = e.target.value; fieldErr("payErr", ""); }
+  if (id === "payPaid" || id === "payOut" || e.target.dataset.bundlePaid) showBundleSplit();
 });
 document.addEventListener("change", e => {
   if (e.target.dataset.field && panel && panel.view === "item") saveField(e.target);

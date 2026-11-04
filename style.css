@@ -108,6 +108,11 @@ button.pill:hover { background: color-mix(in srgb, var(--c) 28%, transparent); }
 .bigbox { font-size: 26px; font-weight: 800; margin: 2px 0 12px; }
 .status { margin-bottom: 12px; }
 #matches { margin-top: 14px; }
+.bundle-item { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
+.bundle-item .link.danger { margin-top: 0; }
+#bundleMatches { margin-top: 8px; }
+#bundleSplit { margin: 8px 0 0; font-size: 13px; }
+.bundle-links { display: flex; flex-wrap: wrap; gap: 0 14px; }
 #panel .row { grid-template-columns: 56px minmax(0, 1fr) auto; }
 #panel .row.flat { grid-template-columns: 56px minmax(0, 1fr); }
 
