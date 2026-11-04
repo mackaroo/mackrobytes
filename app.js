@@ -377,7 +377,7 @@ function itemView() {
     <label class="f">Name<input data-field="name" autocomplete="off" value="${h(it.name)}"></label>
     <div class="f">Box${chips("itemBox", BOXES, it.box)}</div>
     ${NOT_LISTED.includes(it.status) ? "" : `<label class="f">Listed price<input data-field="price" inputmode="decimal" autocomplete="off" value="${it.price != null ? h(it.price) : ""}"></label><div class="f">Where${chips("itemPlatform", PLATFORMS, it.platform)}</div><label class="f">Listed date<input data-field="listedAt" type="date" max="${today()}" value="${h(soldDay(it.listedAt))}"></label>`}
-    ${sold ? `<label class="f">Sold for<input data-field="paid" inputmode="decimal" autocomplete="off" value="${it.paid != null ? h(it.paid) : ""}"></label><label class="f">Total payout${it.payoutEstimated ? ' <span class="flag">Estimated</span>' : ""}<input data-field="payout" inputmode="decimal" autocomplete="off" value="${it.payout != null ? h(it.payout) : ""}"></label><label class="f">Buyer username<input data-field="buyer" autocomplete="off" autocapitalize="off" spellcheck="false" value="${h(it.buyer || "")}"></label><label class="f">Sale date<input data-field="soldAt" type="date" max="${today()}" value="${h(soldDay(it.soldAt))}"></label>` : ""}
+    ${sold ? `<label class="f">Sold for<input data-field="paid" inputmode="decimal" autocomplete="off" value="${it.paid != null ? h(it.paid) : ""}"></label><label class="f">Total payout${it.payoutEstimated ? ' <span class="flag" data-est>Estimated</span>' : ""}<input data-field="payout" inputmode="decimal" autocomplete="off" value="${it.payout != null ? h(it.payout) : ""}"></label>${it.payoutEstimated ? '<button type="button" class="link" data-est data-act="confirmPayout">Payout is correct</button>' : ""}<label class="f">Buyer username<input data-field="buyer" autocomplete="off" autocapitalize="off" spellcheck="false" value="${h(it.buyer || "")}"></label><label class="f">Sale date<input data-field="soldAt" type="date" max="${today()}" value="${h(soldDay(it.soldAt))}"></label>` : ""}
     <p class="err" id="itemErr" hidden></p>
     <button class="link danger" data-act="askDelete" data-id="${id}">Delete item</button>`;
 }
@@ -387,6 +387,7 @@ function photoStripHtml(it) {
   return `<img class="big" data-photo="${h(main.id)}" src="${h(photoSrc(main.id))}" alt=""><div class="thumbs">${photos.map(p => `<div class="thumb"><img data-photo="${h(p.id)}" data-act="showPhoto" data-v="${h(p.id)}" src="${h(photoSrc(p.id))}" alt=""><button type="button" class="thumb-x" data-act="askDropPhoto" data-v="${h(p.id)}" aria-label="Remove photo">×</button></div>`).join("")}</div>`;
 }
 function renderPhotoStrip(id) { if (panel && panel.view === "item" && panel.id === id) $("#photoStrip").innerHTML = photoStripHtml(S.items[id]); }
+const clearEstimated = () => $$("[data-est]").forEach(e => e.remove());
 async function saveField(input) {
   const it = S.items[panel.id], field = input.dataset.field, id = panel.id; fieldErr("itemErr", "");
   if (field === "name") {
@@ -409,7 +410,7 @@ async function saveField(input) {
   const blank = input.value.trim() === "", v = blank ? null : parseMoney(input.value);
   if (!blank && v == null) { input.value = it[field] != null ? it[field] : ""; return fieldErr("itemErr", "That amount isn't a number, so it wasn't saved."); }
   if (v === it[field]) return;
-  patchItem(id, field === "payout" ? { payout: v, payoutEstimated: false } : { [field]: v });
+  patchItem(id, field === "payout" ? { payout: v, payoutEstimated: false } : { [field]: v }).then(ok => { if (ok && field === "payout") clearEstimated(); });
 }
 
 /* Confirm */
@@ -467,6 +468,7 @@ const actions = {
   saleBack: () => openPanel({ view: "salePick", ...panel.back }),
   saleToList: () => { panel.showToList = true; $("#matches").innerHTML = matchesHtml(); },
   setStatus: t => changeStatus(panel.id, t.dataset.v),
+  confirmPayout: async () => { if (await patchItem(panel.id, { payoutEstimated: false })) clearEstimated(); },
   statusMenu: openStatusMenu,
   pickStatus: async t => { const id = $("#statusMenu").dataset.id; closeStatusMenu(); await changeStatus(id, t.dataset.v); if (!panel) focusPill(id); },
   askDelete: t => { const id = t.dataset.id; askConfirm("Delete " + id + "?", "Delete item", async () => {
@@ -483,10 +485,13 @@ const actions = {
   backup: saveBackup,
   signOut: () => AUTH.signOut()
 };
+// A drag that starts inside the panel and ends outside it (selecting text) also clicks the scrim. Only a press that started outside closes it.
+let pressOnScrim = false;
+document.addEventListener("pointerdown", e => { pressOnScrim = e.target.id === "scrim"; });
 document.addEventListener("click", e => {
   // Clicking outside the status menu only closes it.
   if (statusMenuOpen() && !e.target.closest("#statusMenu")) return closeStatusMenu();
-  if (e.target.id === "scrim") return closePanel();
+  if (e.target.id === "scrim") return pressOnScrim ? closePanel() : undefined;
   if (e.target.type === "date") return e.target.showPicker();
   const t = e.target.closest("[data-act]"); if (!t) return;
   const fn = actions[t.dataset.act]; if (fn) fn(t);
@@ -577,8 +582,9 @@ function showLogin() {
   };
 }
 (async () => {
-  const configured = window.CONFIG && CONFIG.SUPABASE_URL && !CONFIG.SUPABASE_URL.startsWith("YOUR") && typeof STORE !== "undefined";
+  const configured = window.CONFIG && CONFIG.SUPABASE_URL && !CONFIG.SUPABASE_URL.startsWith("YOUR");
   if (!configured) return startLocal();
-  try { if (await AUTH.session()) startSync(); else showLogin(); }
+  // typeof STORE also throws when store.js ran but the database library was missing, so it stays inside the try.
+  try { if (typeof STORE === "undefined") throw new Error("store.js didn't load"); if (await AUTH.session()) startSync(); else showLogin(); }
   catch (e) { console.error("Sign-in check failed", e); showFatal("Couldn't reach your shop. Check your connection, then reload."); }
 })();

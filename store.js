@@ -3,6 +3,8 @@
    Exposes STORE (documents), PHOTOS (files) and AUTH. */
 const sb = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
 const BUCKET = "photos";
+// A lost login makes the database return empty lists instead of errors, so go back to sign-in rather than show an empty shop.
+sb.auth.onAuthStateChange(event => { if (event === "SIGNED_OUT") location.reload(); });
 
 const AUTH = {
   async session() { const { data } = await sb.auth.getSession(); return data.session; },
@@ -10,6 +12,7 @@ const AUTH = {
   async signOut() { await sb.auth.signOut(); location.reload(); }
 };
 
+const watched = {}; // coll -> the live map each watch() keeps
 const STORE = {
   async put(coll, id, data) {
     const { error } = await sb.from("docs").upsert({ coll, id, data, updated_at: new Date().toISOString() });
@@ -36,10 +39,11 @@ const STORE = {
   async del(coll, id) {
     const { error } = await sb.from("docs").delete().eq("coll", coll).eq("id", id);
     if (error) throw error;
+    if (watched[coll]) delete watched[coll][id];
   },
   // Calls onChange(map of id -> data) now and after every change from any device.
   watch(coll, onChange, onError) {
-    const map = {};
+    const map = watched[coll] = {};
     const load = async () => {
       const rows = []; let from = 0;
       for (;;) {
@@ -49,8 +53,10 @@ const STORE = {
       for (const k of Object.keys(map)) delete map[k];
       rows.forEach(r => map[r.id] = r.data); onChange({ ...map });
     };
+    // Filtered here, not on the server: Supabase can't filter deletes unless the table has replica identity full.
     sb.channel("docs-" + coll)
-      .on("postgres_changes", { event: "*", schema: "public", table: "docs", filter: "coll=eq." + coll }, p => {
+      .on("postgres_changes", { event: "*", schema: "public", table: "docs" }, p => {
+        if ((p.eventType === "DELETE" ? p.old : p.new).coll !== coll) return;
         if (p.eventType === "DELETE") delete map[p.old.id]; else map[p.new.id] = p.new.data;
         onChange({ ...map });
       })
