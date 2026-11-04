@@ -16,6 +16,10 @@ function parseMoney(v) {
 
 const BOXES = { fragile: "Fragile", hobby: "Hobby & Tech", soft: "Soft & Collectibles" };
 const PLATFORMS = { depop: "Depop", ebay: "eBay", fb: "Facebook" };
+const YES_NO = { yes: "Yes", no: "No" };
+// platform stays as the first one checked, for items saved before platforms existed.
+const platformsOf = it => it.platforms && it.platforms.length ? it.platforms : it.platform ? [it.platform] : [];
+const platformNames = it => platformsOf(it).map(p => PLATFORMS[p]).filter(Boolean).join(", ");
 const STATUSES = { unlisted: "Unlisted", photos: "Needs photos", ready: "To be listed", listed: "Listed", sold: "Sold & Packing", dropoff: "Pending Dropoff", shipped: "Shipped" };
 const SOLD_STATUSES = ["sold", "dropoff", "shipped"], NOT_LISTED = ["unlisted", "photos", "ready"];
 // Items saved before these statuses existed say "tolist". Sorted by photos when loaded; the saved copy changes on their next status change.
@@ -33,6 +37,9 @@ function soldDay(v) {
   if (typeof v === "string" && /^\d{4}-\d{2}-\d{2}/.test(v)) return v.slice(0, 10);
   const d = new Date(v); return Number.isNaN(d.getTime()) ? "" : dayValue(d);
 }
+// <input type="datetime-local"> values: local date and time to the minute. Times are stored in ms.
+const timeValue = v => { const d = new Date(v || Date.now()); return Number.isNaN(d.getTime()) ? "" : dayValue(d) + "T" + pad2(d.getHours()) + ":" + pad2(d.getMinutes()); };
+const parseTime = v => { const ms = new Date(v).getTime(); return Number.isNaN(ms) ? null : ms; };
 const newestFirst = (a, b) => String(b.sku).localeCompare(String(a.sku), undefined, { numeric: true });
 
 function toast(msg, { err = false } = {}) {
@@ -103,7 +110,7 @@ async function addNewItem(fields) {
   for (let tries = 0; tries < 5; tries++) {
     const { yy, head, n } = nextSkuNumber(), num = n + bump, sku = head + String(num).padStart(4, "0");
     const now = Date.now();
-    const item = { sku, photos: [], driveUrl: "", status: "photos", price: null, platform: null, paid: null, payout: null, payoutEstimated: false, buyer: null, createdAt: now, updatedAt: now, listedAt: null, soldAt: null, shippedAt: null, ...fields };
+    const item = { sku, photos: [], driveUrl: "", status: "photos", price: null, platform: null, platforms: [], boosted: false, tracking: null, receiptImg: null, labelImg: null, proofImg: null, paid: null, payout: null, payoutEstimated: false, buyer: null, createdAt: now, updatedAt: now, listedAt: null, soldAt: null, shippedAt: null, ...fields };
     try { await createItem(sku, item); saveMeta({ skuYear: yy, skuNext: num + 1 }); renderList(); return sku; }
     catch (e) { if (e && e.code === "23505") { bump++; continue; } throw e; }
   }
@@ -160,6 +167,59 @@ async function addPhotos(id, files) {
   else toast(added.length === 1 ? "Photo saved" : added.length + " photos saved");
 }
 
+/* ---------- receipt, label and proof images: kept for records, apart from the listing photos ---------- */
+const RECORDS = { receipt: ["receiptImg", "Depop receipt"], label: ["labelImg", "Shipping label"], proof: ["proofImg", "Proof of shipping"] };
+const recordIds = it => Object.values(RECORDS).map(([f]) => it[f] && it[f].id).filter(Boolean);
+function slotHtml(kind) {
+  const [field, label] = RECORDS[kind], saved = S.items[panel.id][field], draft = (panel.drafts || {})[kind], onItem = panel.view === "item";
+  const shown = saved && hasPhoto(saved) ? saved : null;
+  const thumbHtml = draft ? `<div class="thumb"><img src="${h(draft.url)}" alt="${h(label)}"><button type="button" class="thumb-x" data-act="dropDraft" data-v="${kind}" aria-label="Remove image">×</button></div>`
+    : shown ? `<div class="thumb"><img data-photo="${h(shown.id)}" src="${h(photoSrc(shown.id))}" alt="${h(label)}"${onItem ? ` data-act="viewRecord" data-v="${kind}"` : ""}>${onItem ? `<button type="button" class="thumb-x" data-act="askDropRecord" data-v="${kind}" aria-label="Remove image">×</button>` : ""}</div>` : "";
+  return `<div class="f" id="slot-${kind}">${h(label)}<div class="slot">${thumbHtml}<button type="button" class="drop small" data-slot="${kind}" data-act="pickSlot" data-v="${kind}">${draft || shown ? "Replace image" : "Upload or take a picture"}</button></div></div>`;
+}
+const redrawSlot = kind => { const s = $("#slot-" + kind); if (s) s.outerHTML = slotHtml(kind); };
+// Checks the image can be read now. In a popup it waits for the save; on the item page it saves right away.
+async function slotFile(kind, file) {
+  const p = panel; if (!file) return;
+  try { if (!isImage(file)) throw new Error("Not an image"); (await createImageBitmap(file)).close(); }
+  catch (e) { console.error("Image failed", file.name, e); return toast(photoErrMsg([file.name]), { err: true }); }
+  if (panel !== p) return;
+  if (p.view === "item") {
+    toast("Saving image…");
+    if (await patchWithRecords(p.id, {}, { [kind]: { file } })) { toast("Image saved"); if (panel === p) redrawSlot(kind); }
+    return;
+  }
+  const drafts = p.drafts = p.drafts || {};
+  if (drafts[kind]) URL.revokeObjectURL(drafts[kind].url);
+  drafts[kind] = { file, url: URL.createObjectURL(file) };
+  redrawSlot(kind);
+}
+// Larger than listing photos so small print and barcodes stay readable. Replaced images are removed only after a good save.
+async function patchWithRecords(id, patch, drafts = {}) {
+  const fields = {}, ids = [], cur = S.items[id] || {};
+  for (const kind of Object.keys(drafts)) {
+    try { const up = await uploadPhoto(await toJpeg(drafts[kind].file, 2400, 0.9)); ids.push(up); fields[RECORDS[kind][0]] = { id: up, at: Date.now() }; }
+    catch (e) { console.error("Image upload failed", kind, e); await deleteStoredPhotos(ids); toast(uploadErrMsg([RECORDS[kind][1]]), { err: true }); return false; }
+  }
+  const replaced = Object.keys(fields).map(f => cur[f] && cur[f].id).filter(Boolean);
+  if (!await patchItem(id, { ...patch, ...fields })) { await deleteStoredPhotos(ids); return false; }
+  deleteStoredPhotos(replaced);
+  return true;
+}
+// Saves a popup's form with its images. The button stays off while images upload, so a double click can't save twice.
+async function savePopup(patch) {
+  const p = panel, go = $("#panel button[type=submit]"), drafts = p.drafts || {};
+  go.disabled = true;
+  if (Object.keys(drafts).length) toast("Saving images…");
+  const ok = await patchWithRecords(p.id, patch, drafts);
+  go.disabled = false;
+  return ok && panel === p;
+}
+function recordView() {
+  const [field, label] = RECORDS[panel.kind], rec = S.items[panel.id][field];
+  return `<h2>${h(label)}</h2>${rec ? `<img class="big record" data-photo="${h(rec.id)}" src="${h(photoSrc(rec.id))}" alt="${h(label)}">` : `<p class="muted">This image was removed.</p>`}<div class="btns"><button class="btn" data-act="openItem" data-id="${h(panel.id)}" autofocus>Back</button></div>`;
+}
+
 /* ---------- main screen ---------- */
 const thumb = (it, cls = "ph") => {
   const p = (it.photos || []).find(hasPhoto);
@@ -177,7 +237,7 @@ function statusPill(it) {
 }
 function rowSub(it) {
   const parts = [h(boxName(it))];
-  if (it.status === "listed") parts.push(it.price == null ? flag("Needs price") : `${money(it.price)} · ${h(PLATFORMS[it.platform] || "No platform")}`);
+  if (it.status === "listed") parts.push(it.price == null ? flag("Needs price") : `${money(it.price)} · ${h(platformNames(it) || "No platform")}`);
   if (isSold(it)) parts.push(it.payout == null ? flag("Needs payout") : `${it.paid == null ? flag("Needs sold price") : "Sold for " + money(it.paid)} · ${it.payoutEstimated ? "Estimated payout" : "Payout"} ${money(it.payout)}`);
   return parts.join(" · ");
 }
@@ -221,8 +281,8 @@ let panel = null;
 function openPanel(p) { panel = p; drawPanel(); $("#scrim").hidden = false; const f = $("#panel [autofocus]"); if (f) f.focus(); }
 function closePanel() { panel = null; $("#scrim").hidden = true; $("#panel").innerHTML = ""; }
 function drawPanel() {
-  const views = { add: addView, created: createdView, list: listView, salePick: salePickView, salePay: salePayView, saleDone: saleDoneView, item: itemView, confirm: confirmView, settings: settingsView };
-  $("#panel").classList.toggle("pop", panel.view === "salePay");
+  const views = { add: addView, created: createdView, list: listView, salePick: salePickView, salePay: salePayView, saleDone: saleDoneView, ship: shipView, record: recordView, item: itemView, confirm: confirmView, settings: settingsView };
+  $("#panel").classList.toggle("pop", ["list", "salePay", "ship"].includes(panel.view));
   $("#panel").innerHTML = `<button class="x" data-act="close" aria-label="Close">×</button>` + (panel.id && !S.items[panel.id] ? `<p class="err">That item no longer exists.</p>` : views[panel.view]());
 }
 const fieldErr = (id, msg) => { const e = $("#" + id); if (e) { e.textContent = msg || ""; e.hidden = !msg; } };
@@ -272,12 +332,17 @@ function createdView() {
 }
 
 /* Mark listed */
+const platformChecks = on => `<div class="checks">${Object.keys(PLATFORMS).map(k => `<label class="check"><input type="checkbox" data-plat value="${k}"${on.includes(k) ? " checked" : ""}>${h(PLATFORMS[k])}</label>`).join("")}</div>`;
+const checkedPlatforms = () => $$("[data-plat]:checked").map(c => c.value);
 function listView() {
-  const it = S.items[panel.id];
+  const it = S.items[panel.id], on = platformsOf(it).length ? platformsOf(it) : [panel.platform];
+  if (!panel.boosted) panel.boosted = it.boosted ? "yes" : "no";
   return `<h2>Mark listed</h2>${titleLine(it)}<form data-form="list">
+    <div class="f">Platforms${platformChecks(on)}</div>
     <label class="f">Listed price<input id="listPrice" inputmode="decimal" autocomplete="off" placeholder="14.99" value="${it.price != null ? h(it.price) : ""}" autofocus></label>
     <p class="warn" id="dupWarn" hidden></p>
-    <div class="f">Where${chips("platform", PLATFORMS, panel.platform)}</div>
+    <div class="f">Boosted listing${chips("boosted", YES_NO, panel.boosted)}</div>
+    <label class="f">Listed date<input id="listDate" type="datetime-local" value="${timeValue()}"></label>
     <p class="err" id="listErr" hidden></p>
     <button class="btn primary wide" type="submit">Mark listed</button></form>`;
 }
@@ -289,9 +354,13 @@ function checkDuplicatePrice() {
 async function submitList() {
   const price = parseMoney($("#listPrice").value);
   if (price == null) return fieldErr("listErr", "Enter the listed price first.");
-  if (!panel.platform) return fieldErr("listErr", "Pick where it's listed.");
+  const platforms = checkedPlatforms();
+  if (!platforms.length) return fieldErr("listErr", "Check at least one platform.");
+  const listedAt = parseTime($("#listDate").value);
+  if (listedAt == null) return fieldErr("listErr", "Pick the listed date first.");
+  if (listedAt > Date.now()) return fieldErr("listErr", "The listed date can't be in the future.");
   const id = panel.id, stay = panel.stay;
-  if (await patchItem(id, { status: "listed", price, platform: panel.platform, listedAt: Date.now() })) { if (!stay) { S.tab = "listed"; renderList(); } closePanel(); toast(id + " is listed"); }
+  if (await patchItem(id, { status: "listed", price, platforms, platform: platforms[0], boosted: panel.boosted === "yes", listedAt })) { if (!stay) { S.tab = "listed"; renderList(); } closePanel(); toast(id + " is listed"); }
 }
 
 /* Record sale */
@@ -303,7 +372,7 @@ function rankMatches(items, paid) {
 function matchesHtml() {
   const paid = parseMoney(panel.paid);
   const pool = Object.values(S.items).filter(i => i.status === "listed" || (panel.showToList && NOT_LISTED.includes(i.status)));
-  const row = it => `<div class="row" data-act="salePick" data-id="${h(it.sku)}">${thumb(it)}<div class="grow">${titleLine(it)}<div class="sub">${h(boxName(it))} · ${h(PLATFORMS[it.platform] || STATUSES[it.status])}</div></div><div class="amt"><b>${it.price == null ? "No price" : money(it.price)}</b>${paid != null && it.price === paid ? "<small class='good'>Exact</small>" : ""}</div></div>`;
+  const row = it => `<div class="row" data-act="salePick" data-id="${h(it.sku)}">${thumb(it)}<div class="grow">${titleLine(it)}<div class="sub">${h(boxName(it))} · ${h(platformNames(it) || STATUSES[it.status])}</div></div><div class="amt"><b>${it.price == null ? "No price" : money(it.price)}</b>${paid != null && it.price === paid ? "<small class='good'>Exact</small>" : ""}</div></div>`;
   return (pool.length ? rankMatches(pool, paid).map(row).join("") : `<div class="empty">No listed items yet.</div>`) +
     (panel.showToList ? "" : `<button type="button" class="link" data-act="saleToList">Show items not listed yet</button>`);
 }
@@ -311,12 +380,15 @@ function salePickView() {
   return `<h2>Record sale</h2><label class="f">Sold for<input id="salePaid" inputmode="decimal" autocomplete="off" placeholder="14.99" value="${h(panel.paid || "")}" autofocus></label><div id="matches">${matchesHtml()}</div>`;
 }
 function salePayView() {
-  const it = S.items[panel.id];
+  const it = S.items[panel.id], paid = panel.paid || (it.paid != null ? it.paid : "");
   return `<h2>Mark sold</h2><div class="row flat">${thumb(it)}<div class="grow">${titleLine(it)}<div class="sub">${h(boxName(it))}</div></div></div><form data-form="sale">
-    <label class="f">Sold for<input id="payPaid" inputmode="decimal" autocomplete="off" value="${h(panel.paid || "")}" ${panel.paid ? "" : "autofocus"}></label>
-    <label class="f">Total payout<input id="payOut" inputmode="decimal" autocomplete="off" placeholder="12.70" ${panel.paid ? "autofocus" : ""}></label>
-    <label class="f">Buyer username<input id="payBuyer" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
-    <label class="f">Sale date<input id="payDate" type="date" max="${today()}" value="${today()}"></label>
+    <label class="f">Sold for<input id="payPaid" inputmode="decimal" autocomplete="off" value="${h(paid)}" ${paid !== "" ? "" : "autofocus"}></label>
+    <label class="f">Total payout<input id="payOut" inputmode="decimal" autocomplete="off" placeholder="12.70" value="${it.payout != null ? h(it.payout) : ""}" ${paid !== "" ? "autofocus" : ""}></label>
+    <label class="f">Buyer username<input id="payBuyer" autocomplete="off" autocapitalize="off" spellcheck="false" value="${h(it.buyer || "")}"></label>
+    <label class="f">Sale date<input id="payDate" type="date" max="${today()}" value="${h(soldDay(it.soldAt) || today())}"></label>
+    ${slotHtml("receipt")}
+    <label class="f">Tracking number<input id="payTracking" autocomplete="off" autocapitalize="off" spellcheck="false" value="${h(it.tracking || "")}"></label>
+    ${slotHtml("label")}
     <p class="err" id="payErr" hidden></p>
     <div class="btns"><button class="btn primary" type="submit">Mark sold</button>${panel.back ? `<button type="button" class="btn" data-act="saleBack">Back</button>` : ""}</div></form>`;
 }
@@ -328,14 +400,37 @@ async function submitSale() {
   const day = $("#payDate").value;
   if (!day) return fieldErr("payErr", "Pick the sale date first.");
   if (day > today()) return fieldErr("payErr", "The sale date can't be in the future.");
-  const id = panel.id, buyer = $("#payBuyer").value.trim() || null;
-  const status = panel.target || "sold", stay = panel.stay;
-  if (await patchItem(id, { status, paid, payout, payoutEstimated: false, buyer, soldAt: dayToMs(day), shippedAt: status === "shipped" ? Date.now() : null })) { if (!stay) { S.q = ""; $("#search").value = ""; S.tab = status; renderList(); } openPanel({ view: "saleDone", id }); }
+  const id = panel.id, it = S.items[id], buyer = $("#payBuyer").value.trim() || null, tracking = $("#payTracking").value.trim() || null;
+  // Heading to Shipped goes through the Shipped popup. Closing that leaves the item in Sold & Packing.
+  const target = panel.target || "sold", status = target === "shipped" ? "sold" : target, stay = panel.stay;
+  const payoutEstimated = !!(it && it.payoutEstimated) && payout === it.payout;
+  if (await savePopup({ status, paid, payout, payoutEstimated, buyer, tracking, soldAt: dayToMs(day), shippedAt: null })) {
+    if (!stay) { S.q = ""; $("#search").value = ""; S.tab = status; renderList(); }
+    openPanel(target === "shipped" ? { view: "ship", id } : { view: "saleDone", id });
+  }
 }
 function saleDoneView() {
   const it = S.items[panel.id];
   return `<p class="muted">Sold. Pull this one from</p><div class="bigbox">${h(boxName(it))}</div><div class="done-photo">${thumb(it, "big")}</div><div class="bigsku">${h(it.sku)}</div><p class="name">${h(it.name)}</p>
     <p class="muted">Sold for ${money(it.paid)} · Total payout ${money(it.payout)}</p><div class="btns"><button class="btn primary" data-act="close" autofocus>Done</button></div>`;
+}
+
+/* Mark shipped */
+function shipView() {
+  const it = S.items[panel.id];
+  return `<h2>Mark shipped</h2><div class="row flat">${thumb(it)}<div class="grow">${titleLine(it)}<div class="sub">${h(boxName(it))}</div></div></div><form data-form="ship">
+    <label class="f">Ship date<input id="shipDate" type="datetime-local" value="${timeValue()}"></label>
+    <label class="f">Tracking number<input id="shipTracking" autocomplete="off" autocapitalize="off" spellcheck="false" value="${h(it.tracking || "")}" autofocus></label>
+    ${slotHtml("proof")}
+    <p class="err" id="shipErr" hidden></p>
+    <button class="btn primary wide" type="submit">Mark shipped</button></form>`;
+}
+async function submitShip() {
+  const shippedAt = parseTime($("#shipDate").value);
+  if (shippedAt == null) return fieldErr("shipErr", "Pick the ship date first.");
+  if (shippedAt > Date.now()) return fieldErr("shipErr", "The ship date can't be in the future.");
+  const id = panel.id, back = panel.back;
+  if (await savePopup({ status: "shipped", shippedAt, tracking: $("#shipTracking").value.trim() || null })) { if (back) openItem(id); else closePanel(); toast(id + " is shipped"); }
 }
 
 /* Item page */
@@ -348,8 +443,9 @@ function itemView() {
     ${it.driveUrl ? `<a class="link" href="${h(it.driveUrl)}" target="_blank" rel="noopener">Open photos in Google Drive</a>` : ""}
     <label class="f">Name<input data-field="name" autocomplete="off" value="${h(it.name)}"></label>
     <div class="f">Box${chips("itemBox", BOXES, it.box)}</div>
-    ${NOT_LISTED.includes(it.status) ? "" : `<label class="f">Listed price<input data-field="price" inputmode="decimal" autocomplete="off" value="${it.price != null ? h(it.price) : ""}"></label><div class="f">Where${chips("itemPlatform", PLATFORMS, it.platform)}</div><label class="f">Listed date<input data-field="listedAt" type="date" max="${today()}" value="${h(soldDay(it.listedAt))}"></label>`}
-    ${sold ? `<label class="f">Sold for<input data-field="paid" inputmode="decimal" autocomplete="off" value="${it.paid != null ? h(it.paid) : ""}"></label><label class="f">Total payout${it.payoutEstimated ? ' <span class="flag" data-est>Estimated</span>' : ""}<input data-field="payout" inputmode="decimal" autocomplete="off" value="${it.payout != null ? h(it.payout) : ""}"></label>${it.payoutEstimated ? '<button type="button" class="link" data-est data-act="confirmPayout">Payout is correct</button>' : ""}<label class="f">Buyer username<input data-field="buyer" autocomplete="off" autocapitalize="off" spellcheck="false" value="${h(it.buyer || "")}"></label><label class="f">Sale date<input data-field="soldAt" type="date" max="${today()}" value="${h(soldDay(it.soldAt))}"></label>` : ""}
+    ${NOT_LISTED.includes(it.status) ? "" : `<label class="f">Listed price<input data-field="price" inputmode="decimal" autocomplete="off" value="${it.price != null ? h(it.price) : ""}"></label><div class="f">Platforms${platformChecks(platformsOf(it))}</div><div class="f">Boosted listing${chips("itemBoost", YES_NO, it.boosted ? "yes" : "no")}</div><label class="f">Listed date<input data-field="listedAt" type="datetime-local" value="${it.listedAt ? timeValue(it.listedAt) : ""}"></label>`}
+    ${sold ? `<label class="f">Sold for<input data-field="paid" inputmode="decimal" autocomplete="off" value="${it.paid != null ? h(it.paid) : ""}"></label><label class="f">Total payout${it.payoutEstimated ? ' <span class="flag" data-est>Estimated</span>' : ""}<input data-field="payout" inputmode="decimal" autocomplete="off" value="${it.payout != null ? h(it.payout) : ""}"></label>${it.payoutEstimated ? '<button type="button" class="link" data-est data-act="confirmPayout">Payout is correct</button>' : ""}<label class="f">Buyer username<input data-field="buyer" autocomplete="off" autocapitalize="off" spellcheck="false" value="${h(it.buyer || "")}"></label><label class="f">Sale date<input data-field="soldAt" type="date" max="${today()}" value="${h(soldDay(it.soldAt))}"></label><label class="f">Tracking number<input data-field="tracking" autocomplete="off" autocapitalize="off" spellcheck="false" value="${h(it.tracking || "")}"></label>${it.status === "shipped" ? `<label class="f">Ship date<input data-field="shippedAt" type="datetime-local" value="${it.shippedAt ? timeValue(it.shippedAt) : ""}"></label>` : ""}` : ""}
+    ${sold || recordIds(it).length ? Object.keys(RECORDS).map(slotHtml).join("") : ""}
     <p class="err" id="itemErr" hidden></p>
     <button class="link danger" data-act="askDelete" data-id="${id}">Delete item</button>`;
 }
@@ -371,15 +467,21 @@ async function saveField(input) {
     if (v !== it.name) save({ name: v }, it.name);
     return;
   }
-  if (field === "buyer") {
+  if (field === "buyer" || field === "tracking") {
     const v = input.value.trim() || null;
-    if (v !== (it.buyer || null)) save({ buyer: v }, it.buyer || "");
+    if (v !== (it[field] || null)) save({ [field]: v }, it[field] || "");
     return;
   }
-  if (field === "soldAt" || field === "listedAt") {
+  if (field === "soldAt") {
     const day = input.value;
-    if (day > today()) { input.value = soldDay(it[field]); return fieldErr("itemErr", `The ${field === "soldAt" ? "sale" : "listed"} date can't be in the future, so it wasn't saved.`); }
+    if (day > today()) { input.value = soldDay(it[field]); return fieldErr("itemErr", "The sale date can't be in the future, so it wasn't saved."); }
     if (day !== soldDay(it[field])) save({ [field]: day ? dayToMs(day) : null }, soldDay(it[field]));
+    return;
+  }
+  if (field === "listedAt" || field === "shippedAt") {
+    const was = it[field] ? timeValue(it[field]) : "", ms = input.value ? parseTime(input.value) : null;
+    if (ms > Date.now()) { input.value = was; return fieldErr("itemErr", `The ${field === "listedAt" ? "listed" : "ship"} date can't be in the future, so it wasn't saved.`); }
+    if (input.value !== was) save({ [field]: ms }, was);
     return;
   }
   const blank = input.value.trim() === "", v = blank ? null : parseMoney(input.value);
@@ -388,6 +490,13 @@ async function saveField(input) {
   const shown = it[field] != null ? it[field] : "", sale = { paid: it.paid, payout: it.payout, [field]: v };
   if (field !== "price" && sale.paid != null && sale.payout != null && sale.payout > sale.paid) { input.value = shown; return fieldErr("itemErr", "The total payout is more than it sold for, so it wasn't saved."); }
   save(field === "payout" ? { payout: v, payoutEstimated: false } : { [field]: v }, shown).then(ok => { if (ok && field === "payout") clearEstimated(); });
+}
+
+async function saveItemPlatforms() {
+  const id = panel.id, platforms = checkedPlatforms();
+  if (!await patchItem(id, { platforms, platform: platforms[0] || null }) && panel && panel.id === id && S.items[id]) {
+    const on = platformsOf(S.items[id]); $$("[data-plat]").forEach(c => { c.checked = on.includes(c.value); });
+  }
 }
 
 /* Confirm */
@@ -413,14 +522,16 @@ async function changeStatus(id, to) {
   const wasSold = isSold(it), toSold = SOLD_STATUSES.includes(to);
   const inDrawer = panel && panel.view === "item" && panel.id === id, after = () => inDrawer ? openItem(id) : closePanel();
   if (to === it.status) return;
-  if (toSold && !wasSold) return openPanel({ view: "salePay", id, target: to, stay: true });
+  if (to === "sold" || (toSold && !wasSold)) return openPanel({ view: "salePay", id, target: to, stay: true });
+  if (to === "shipped") return openPanel({ view: "ship", id, back: inDrawer });
   if (to === "listed" && !wasSold) return openPanel({ view: "list", id, platform: it.platform || "depop", stay: true });
   if (wasSold && !toSold) return askConfirm("Undo this sale?", "Undo sale", async () => {
-    await patchItem(id, { status: to, paid: null, payout: null, payoutEstimated: false, buyer: null, soldAt: null, shippedAt: null, ...(to === "listed" ? {} : { listedAt: null }) });
+    const ok = await patchItem(id, { status: to, paid: null, payout: null, payoutEstimated: false, buyer: null, tracking: null, soldAt: null, shippedAt: null, ...(to === "listed" ? {} : { listedAt: null }) });
+    if (ok && to === "listed") return openPanel({ view: "list", id, platform: it.platform || "depop", stay: true });
     after();
   }, after);
   const patch = { status: to };
-  if (toSold) patch.shippedAt = to === "shipped" ? Date.now() : null;
+  if (toSold) patch.shippedAt = null;
   else if (it.status === "listed") patch.listedAt = null;
   if (await patchItem(id, patch) && inDrawer) openItem(id);
 }
@@ -437,10 +548,10 @@ const actions = {
   dropFile: t => { const i = +t.dataset.i; URL.revokeObjectURL(panel.urls[i]); panel.files.splice(i, 1); panel.urls.splice(i, 1); $("#dropPreview").innerHTML = previewHtml(); },
   chip: async t => {
     const g = t.dataset.group, v = t.dataset.v;
-    if (g === "box" || g === "platform") { panel[g] = v; $$(`[data-group="${g}"]`).forEach(c => c.classList.toggle("on", c === t)); return; }
+    if (g === "box" || g === "boosted") { panel[g] = v; $$(`[data-group="${g}"]`).forEach(c => c.classList.toggle("on", c === t)); return; }
     $$(`[data-group="${g}"]`).forEach(c => c.classList.toggle("on", c === t));
-    const id = panel.id, field = g === "itemBox" ? "box" : "platform";
-    if (!await patchItem(id, { [field]: v }) && panel && panel.id === id && S.items[id]) $$(`[data-group="${g}"]`).forEach(c => c.classList.toggle("on", c.dataset.v === S.items[id][field]));
+    const id = panel.id, boost = g === "itemBoost", field = boost ? "boosted" : "box";
+    if (!await patchItem(id, { [field]: boost ? v === "yes" : v }) && panel && panel.id === id && S.items[id]) { const saved = boost ? (S.items[id].boosted ? "yes" : "no") : S.items[id].box; $$(`[data-group="${g}"]`).forEach(c => c.classList.toggle("on", c.dataset.v === saved)); }
   },
   salePick: t => { panel = { view: "salePay", id: t.dataset.id, paid: panel.paid, back: { paid: panel.paid, showToList: panel.showToList } }; openPanel(panel); },
   saleBack: () => openPanel({ view: "salePick", ...panel.back }),
@@ -450,12 +561,25 @@ const actions = {
   statusMenu: openStatusMenu,
   pickStatus: async t => { const id = $("#statusMenu").dataset.id; closeStatusMenu(); await changeStatus(id, t.dataset.v); if (!panel) focusPill(id); },
   askDelete: t => { const id = t.dataset.id; askConfirm("Delete " + id + "?", "Delete item", async () => {
-    const photos = ((S.items[id] || {}).photos || []).map(p => p.id);
+    const photos = [...((S.items[id] || {}).photos || []).map(p => p.id), ...recordIds(S.items[id] || {})];
     if (await removeItem(id)) { closePanel(); toast(id + " deleted"); deleteStoredPhotos(photos); } else openItem(id);
   }, () => openItem(id)); },
   showPhoto: t => { panel.photo = t.dataset.v; renderPhotoStrip(panel.id); },
   askDropPhoto: t => { const id = panel.id, pid = t.dataset.v; askConfirm("Remove this photo?", "Remove photo", async () => {
     if (await patchItem(id, { photos: ((S.items[id] || {}).photos || []).filter(p => p.id !== pid) })) deleteStoredPhotos([pid]);
+    openItem(id);
+  }, () => openItem(id)); },
+  pickSlot: t => {
+    const kind = t.dataset.v, input = document.createElement("input");
+    input.type = "file"; input.accept = "image/*";
+    input.onchange = () => slotFile(kind, input.files[0]);
+    input.click();
+  },
+  dropDraft: t => { const kind = t.dataset.v; URL.revokeObjectURL(panel.drafts[kind].url); delete panel.drafts[kind]; redrawSlot(kind); },
+  viewRecord: t => openPanel({ view: "record", id: panel.id, kind: t.dataset.v }),
+  askDropRecord: t => { const id = panel.id, [field, label] = RECORDS[t.dataset.v]; askConfirm("Remove the " + label.toLowerCase() + " image?", "Remove image", async () => {
+    const old = (S.items[id] || {})[field];
+    if (await patchItem(id, { [field]: null }) && old) deleteStoredPhotos([old.id]);
     openItem(id);
   }, () => openItem(id)); },
   confirmYes: () => panel.fn(),
@@ -470,7 +594,7 @@ document.addEventListener("click", e => {
   // Clicking outside the status menu only closes it.
   if (statusMenuOpen() && !e.target.closest("#statusMenu")) return closeStatusMenu();
   if (e.target.id === "scrim") return pressOnScrim ? closePanel() : undefined;
-  if (e.target.type === "date") return e.target.showPicker();
+  if (e.target.type === "date" || e.target.type === "datetime-local") return e.target.showPicker();
   const t = e.target.closest("[data-act]"); if (!t) return;
   const fn = actions[t.dataset.act]; if (fn) fn(t);
 });
@@ -487,7 +611,7 @@ document.addEventListener("keydown", e => {
 window.addEventListener("resize", closeStatusMenu);
 document.addEventListener("submit", e => {
   e.preventDefault();
-  const fn = { add: submitAdd, list: submitList, sale: submitSale }[e.target.dataset.form]; if (fn) fn();
+  const fn = { add: submitAdd, list: submitList, sale: submitSale, ship: submitShip }[e.target.dataset.form]; if (fn) fn();
 });
 document.addEventListener("input", e => {
   const id = e.target.id;
@@ -495,25 +619,31 @@ document.addEventListener("input", e => {
   if (id === "salePaid") { panel.paid = e.target.value; $("#matches").innerHTML = matchesHtml(); }
   if (id === "listPrice") { fieldErr("listErr", ""); checkDuplicatePrice(); }
   if (id === "addName") { panel.name = e.target.value; fieldErr("addErr", ""); }
+  if (id === "listDate") fieldErr("listErr", "");
+  if (id === "shipDate") fieldErr("shipErr", "");
   if (id === "payPaid" || id === "payOut" || id === "payDate") fieldErr("payErr", "");
 });
 document.addEventListener("change", e => {
   if (e.target.dataset.field && panel && panel.view === "item") saveField(e.target);
+  if ("plat" in e.target.dataset && panel) { if (panel.view === "item") saveItemPlatforms(); else fieldErr("listErr", ""); }
   if (e.target.id === "fileIn") { handleFiles(e.target.files); e.target.value = ""; }
 });
 function handleFiles(files) {
   if (!panel) return;
   if (panel.view === "add") addDraftFiles(files);
   else if (panel.view === "item") addPhotos(panel.id, files);
+  else if (panel.view === "salePay" || panel.view === "ship") toast("Drop it on one of the image boxes.", { err: true });
 }
 // A photo dropped outside the drop area must never navigate the app away.
-window.addEventListener("dragover", e => { e.preventDefault(); const d = e.target.closest && e.target.closest("#drop"); $$("#drop").forEach(x => x.classList.toggle("over", x === d)); });
-window.addEventListener("dragleave", e => { if (!e.relatedTarget) $$("#drop").forEach(x => x.classList.remove("over")); });
+window.addEventListener("dragover", e => { e.preventDefault(); const d = e.target.closest && e.target.closest("#drop, [data-slot]"); $$("#drop, [data-slot]").forEach(x => x.classList.toggle("over", x === d)); });
+window.addEventListener("dragleave", e => { if (!e.relatedTarget) $$("#drop, [data-slot]").forEach(x => x.classList.remove("over")); });
 window.addEventListener("drop", e => {
-  e.preventDefault(); $$("#drop").forEach(x => x.classList.remove("over"));
+  e.preventDefault(); $$("#drop, [data-slot]").forEach(x => x.classList.remove("over"));
   if (!(e.target.closest && e.target.closest("#panel"))) return;
   const files = e.dataTransfer && e.dataTransfer.files;
   if (!files || !files.length) return toast("That didn't come through as a file. Save the photo to your Mac, then drag it in.", { err: true });
+  const slot = e.target.closest("[data-slot]");
+  if (slot) return slotFile(slot.dataset.slot, files[0]);
   handleFiles(files);
 });
 

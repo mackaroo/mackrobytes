@@ -89,6 +89,12 @@ button.pill:hover { background: color-mix(in srgb, var(--c) 28%, transparent); }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 5px; }
 .chip { padding: 8px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); cursor: pointer; color: var(--ink); font-size: 14px; }
 .chip.on { background: var(--chip-on); border-color: var(--accent); color: var(--accent); font-weight: 600; }
+.checks { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 5px; }
+.check { display: flex; align-items: center; gap: 7px; color: var(--ink); font-size: 14px; font-weight: 400; cursor: pointer; }
+.f .check input { width: 18px; height: 18px; margin: 0; accent-color: var(--accent); }
+.slot { display: flex; align-items: center; gap: 10px; margin-top: 5px; }
+.slot .drop.small { margin-top: 0; padding: 10px 12px; flex: 1; min-width: 0; font-size: 14px; }
+.big.record { max-height: none; }
 .drop { width: 100%; padding: 26px 12px; border: 1.5px dashed var(--muted); border-radius: 12px; background: none; color: var(--ink); font-weight: 600; cursor: pointer; }
 .drop small { display: block; color: var(--muted); font-weight: 400; font-size: 13px; }
 .drop.small { padding: 12px; margin-top: 8px; }
