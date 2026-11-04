@@ -657,27 +657,31 @@ function drawTable() {
   $$("[data-try]").forEach(td => { const n = v ? v[td.dataset.try] : null; td.textContent = v ? signedMoney(n) : "—"; td.classList.toggle("neg", !!v && n < 0); td.classList.toggle("strong", td.dataset.try === "payout" || td.dataset.try === "boosted"); });
 }
 
-/* Fee Calculator: type in any box and the rest follow */
-const CALC_ROWS = { list: ["Listed price", "listPrice"], send: ["Auto-send offer", "sendPrice"], accept: ["Auto-accept lowest price", "acceptPrice"] };
-const calcField = (key, field, label) => `<label class="f${field === "payout" ? " payout" : ""}">${label}<input data-calc="${key}:${field}" inputmode="decimal" autocomplete="off"></label>`;
+/* Fee Calculator: type in any number and the rest follow */
+const CALC_ROWS = { list: ["Listed", "listPrice"], send: ["Auto-send offer", "sendPrice"], accept: ["Auto-accept price", "acceptPrice"] };
+const calcInputHtml = (key, field) => `<input data-calc="${key}:${field}" inputmode="decimal" autocomplete="off">`;
+const calcRow = (key, field, label, cls = "") => `<label class="calc-row${cls}" data-row="${field}"><span>${label}</span><span class="calc-val">$${calcInputHtml(key, field)}</span></label>`;
 const calcCheck = (key, label) => `<label class="check"><input type="checkbox" data-toggle="${key}">${label}</label>`;
 function calcViewHtml() {
-  const card = key => `<section class="calc-card" data-card="${key}"><h3>${CALC_ROWS[key][0]}</h3><div class="calc-grid">${calcField(key, "price", "Price")}${key === "list" ? "" : calcField(key, "off", "% off listed")}${calcField(key, "buyer", "Buyer pays")}${calcField(key, "proc", "Processing fee")}${calcField(key, "boost", "Boost fee")}${calcField(key, "fees", "Total fees")}${calcField(key, "payout", "Your payout")}</div></section>`;
+  const off = key => key === "list" ? "" : `<label class="calc-off"><span class="calc-val">${calcInputHtml(key, "off")}%</span> off</label>`;
+  const card = key => `<section class="calc-card" data-card="${key}"><div class="calc-head"><h3>${CALC_ROWS[key][0]}</h3>${off(key)}</div>${calcRow(key, "price", "Price", " calc-main")}<div class="calc-fees">${calcRow(key, "proc", "Processing fee")}${calcRow(key, "boost", "Boost fee")}${calcRow(key, "fees", "Total fees")}</div>${calcRow(key, "payout", "Your payout", " calc-main calc-payout")}${calcRow(key, "buyer", "Buyer pays", " calc-buyer")}</section>`;
   return `<h2>Fee Calculator</h2><div class="checks calc-toggles">${calcCheck("boosted", "Boosted")}${calcCheck("sendOn", "Auto-send offers")}${calcCheck("acceptOn", "Auto-accept offers")}</div>
-    <div class="fee-settings">${feeField("ship", "Shipping buyer pays ($)")}${feeField("taxPct", "Buyer's sales tax (%)")}</div>${taxHint}
-    ${Object.keys(CALC_ROWS).map(card).join("")}
+    <div class="calc-cards">${Object.keys(CALC_ROWS).map(card).join("")}</div>
     <p class="warn" id="calcNote" hidden></p>
+    <p class="muted hint">Type in any number and the rest update.</p>
+    <div class="fee-settings">${feeField("ship", "Shipping buyer pays ($)")}${feeField("taxPct", "Buyer's sales tax (%)")}</div>${taxHint}
     <details class="rates"><summary>Depop rates</summary><div class="fee-settings">${feeField("ratePct", "Processing (%)")}${feeField("fixed", "Flat fee ($)")}${feeField("boostPct", "Boost (%)")}</div><button type="button" class="link" data-act="resetRates">Reset to Depop's rates</button></details>`;
 }
 function calcNote(msg) { const n = $("#calcNote"); if (n) { n.textContent = msg || ""; n.hidden = !msg; } }
 function drawCalc(active) {
   $$("[data-toggle]").forEach(c => { c.checked = !!F[c.dataset.toggle]; });
   $('[data-card="send"]').hidden = !F.sendOn; $('[data-card="accept"]').hidden = !F.acceptOn;
+  // Unboosted, the only fee is processing, so the boost and total lines would just repeat it.
+  $$('[data-row="boost"], [data-row="fees"]').forEach(r => { r.hidden = !F.boosted; });
   $$("[data-calc]").forEach(el => {
     if (el === active) return;
     const [key, field] = el.dataset.calc.split(":"), price = F[CALC_ROWS[key][1]], b = feeBreakdown(price);
     el.value = field === "off" ? String(F.listPrice > 0 ? Math.round((1 - price / F.listPrice) * 1000) / 10 : 0) : b[field].toFixed(2);
-    el.disabled = field === "boost" && !F.boosted;
     el.classList.toggle("neg", field === "payout" && b.payout < 0);
   });
 }

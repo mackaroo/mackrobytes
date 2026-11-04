@@ -140,14 +140,24 @@ input.bad { outline: 2px solid var(--bad); outline-offset: -1px; }
 .calc-toggles { gap: 6px 20px; }
 .calc-toggles .check { white-space: nowrap; }
 .calc-toggles input { width: 18px; height: 18px; margin: 0; accent-color: var(--accent); }
-.calc-card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px 16px; margin-top: 14px; }
+.calc-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 340px)); gap: 12px; margin: 14px 0 8px; }
+.calc-card { display: flex; flex-direction: column; background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 12px 16px 14px; }
+.calc-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 32px; margin-bottom: 6px; }
 .calc-card h3 { font-size: 15px; font-weight: 700; margin: 0; }
-.calc-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(112px, 1fr)); gap: 0 10px; }
-.calc-grid .f { margin-top: 10px; }
-.calc-grid input { font-variant-numeric: tabular-nums; }
-.calc-grid input:disabled { opacity: .55; }
-.calc-grid .payout { color: var(--good); }
-.calc-grid .payout input { font-weight: 700; color: var(--good); border-color: var(--good); }
+.calc-off { display: flex; align-items: center; gap: 2px; font-size: 13px; color: var(--muted); white-space: nowrap; cursor: text; }
+.calc-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 2px 0; font-size: 14px; color: var(--muted); cursor: text; }
+.calc-val { display: inline-flex; align-items: center; padding: 2px 6px; border: 1px solid transparent; border-radius: 8px; color: var(--ink); font-variant-numeric: tabular-nums; }
+.calc-val:hover { border-color: var(--line); }
+.calc-val:focus-within { border-color: var(--accent); }
+.calc-val input { width: 6ch; padding: 0; background: none; border: 0; border-radius: 0; text-align: right; color: inherit; font-weight: inherit; }
+@supports (field-sizing: content) { .calc-val input { width: auto; min-width: 2ch; max-width: 10ch; field-sizing: content; } }
+.calc-val input:focus:not(.bad) { outline: none; }
+.calc-main { color: var(--ink); font-weight: 600; }
+.calc-main .calc-val { padding: 4px 10px; font-size: 22px; font-weight: 800; background: var(--bg); border-color: var(--line); }
+.calc-fees { margin: 8px 0; padding: 6px 0; border-block: 1px solid var(--line); }
+.calc-payout, .calc-payout .calc-val { color: var(--good); }
+.calc-payout .calc-val { border-color: var(--good); }
+.calc-buyer { margin-top: auto; padding-top: 8px; font-size: 13px; }
 #calcNote { margin-top: 12px; }
 .rates { margin-top: 16px; font-size: 14px; }
 .rates summary { cursor: pointer; color: var(--muted); font-weight: 600; }
