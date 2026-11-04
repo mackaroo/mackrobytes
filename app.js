@@ -202,7 +202,7 @@ const flag = t => `<span class="flag">${h(t)}</span>`;
 function statusPill(it) {
   const day = it.status === "listed" ? soldDay(it.listedAt) : "";
   const date = day ? " · " + new Date(dayToMs(day)).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : "";
-  return `<span class="pill s-${h(it.status)}">${h(STATUSES[it.status])}${date}</span>`;
+  return `<button type="button" class="pill s-${h(it.status)}" data-act="statusMenu" data-id="${h(it.sku)}" aria-haspopup="menu">${h(STATUSES[it.status])}${date}</button>`;
 }
 function rowSub(it) {
   const parts = [h(boxName(it))];
@@ -226,6 +226,23 @@ function renderList() {
   const needle = S.q.trim().toLowerCase();
   const rows = (needle ? all.filter(i => (i.sku + " " + i.name).toLowerCase().includes(needle)) : all.filter(i => S.tab === "all" || i.status === S.tab)).sort(newestFirst);
   $("#list").innerHTML = rows.length ? rows.map(it => `<div class="row" data-act="openItem" data-id="${h(it.sku)}">${thumb(it)}<div class="grow">${titleLine(it)}<div class="sub">${rowSub(it)}</div></div><div class="right">${statusPill(it)}</div></div>`).join("") : `<div class="empty">${needle ? "No items match that." : "No items here."}</div>`;
+}
+
+/* ---------- status menu (the pill on each row) ---------- */
+const statusMenuOpen = () => !$("#statusMenu").hidden;
+const closeStatusMenu = () => { $("#statusMenu").hidden = true; };
+const focusPill = id => { const p = $$('#list [data-act="statusMenu"]').find(b => b.dataset.id === id); if (p) p.focus({ preventScroll: true }); };
+function openStatusMenu(pill) {
+  const m = $("#statusMenu"), it = S.items[pill.dataset.id];
+  m.dataset.id = pill.dataset.id;
+  m.innerHTML = Object.keys(STATUSES).map(k => `<button type="button" role="menuitem" class="pill s-${k}${it.status === k ? " on" : ""}" data-act="pickStatus" data-v="${k}">${h(STATUSES[k])}</button>`).join("");
+  m.hidden = false;
+  // Opens below the pill, or above it when there's no room. Scrolls with the page.
+  const r = pill.getBoundingClientRect(), mw = m.offsetWidth, mh = m.offsetHeight;
+  const up = r.bottom + 4 + mh > innerHeight && r.top - 4 - mh >= 0;
+  m.style.top = scrollY + (up ? r.top - 4 - mh : r.bottom + 4) + "px";
+  m.style.left = scrollX + Math.max(8, Math.min(r.right - mw, innerWidth - mw - 8)) + "px";
+  m.querySelector(".on").focus({ preventScroll: true });
 }
 
 /* ---------- panel ---------- */
@@ -300,8 +317,8 @@ async function submitList() {
   const price = parseMoney($("#listPrice").value);
   if (price == null) return fieldErr("listErr", "Enter the listed price first.");
   if (!panel.platform) return fieldErr("listErr", "Pick where it's listed.");
-  const id = panel.id;
-  if (await patchItem(id, { status: "listed", price, platform: panel.platform, listedAt: Date.now() })) { S.tab = "listed"; renderList(); closePanel(); toast(id + " is listed"); }
+  const id = panel.id, stay = panel.stay;
+  if (await patchItem(id, { status: "listed", price, platform: panel.platform, listedAt: Date.now() })) { if (!stay) { S.tab = "listed"; renderList(); } closePanel(); toast(id + " is listed"); }
 }
 
 /* Record sale */
@@ -339,8 +356,8 @@ async function submitSale() {
   if (!day) return fieldErr("payErr", "Pick the sale date first.");
   if (day > today()) return fieldErr("payErr", "The sale date can't be in the future.");
   const id = panel.id, buyer = $("#payBuyer").value.trim() || null;
-  const status = panel.target || "sold";
-  if (await patchItem(id, { status, paid, payout, payoutEstimated: false, buyer, soldAt: dayToMs(day), shippedAt: status === "shipped" ? Date.now() : null })) { S.q = ""; $("#search").value = ""; S.tab = status; renderList(); openPanel({ view: "saleDone", id }); }
+  const status = panel.target || "sold", stay = panel.stay;
+  if (await patchItem(id, { status, paid, payout, payoutEstimated: false, buyer, soldAt: dayToMs(day), shippedAt: status === "shipped" ? Date.now() : null })) { if (!stay) { S.q = ""; $("#search").value = ""; S.tab = status; renderList(); } openPanel({ view: "saleDone", id }); }
 }
 function saleDoneView() {
   const it = S.items[panel.id];
@@ -412,6 +429,23 @@ function saveBackup() {
 }
 
 /* ---------- events ---------- */
+// Changing a status keeps the current tab, search and scroll position.
+async function changeStatus(id, to) {
+  const it = S.items[id]; if (!it) return toast("That item no longer exists.", { err: true });
+  const wasSold = isSold(it), toSold = SOLD_STATUSES.includes(to);
+  const inDrawer = panel && panel.view === "item" && panel.id === id, after = () => inDrawer ? openItem(id) : closePanel();
+  if (to === it.status) return;
+  if (toSold && !wasSold) return openPanel({ view: "salePay", id, target: to, stay: true });
+  if (to === "listed" && !wasSold) return openPanel({ view: "list", id, platform: it.platform || "depop", stay: true });
+  if (wasSold && !toSold) return askConfirm("Undo this sale?", "Undo sale", async () => {
+    await patchItem(id, { status: to, paid: null, payout: null, payoutEstimated: false, buyer: null, soldAt: null, shippedAt: null, ...(to === "listed" ? {} : { listedAt: null }) });
+    after();
+  }, after);
+  const patch = { status: to };
+  if (toSold) patch.shippedAt = to === "shipped" ? Date.now() : null;
+  else if (it.status === "listed") patch.listedAt = null;
+  if (await patchItem(id, patch) && inDrawer) openItem(id);
+}
 const openItem = id => openPanel({ view: "item", id });
 const actions = {
   close: closePanel,
@@ -432,20 +466,9 @@ const actions = {
   salePick: t => { panel = { view: "salePay", id: t.dataset.id, paid: panel.paid, back: { paid: panel.paid, showToList: panel.showToList } }; openPanel(panel); },
   saleBack: () => openPanel({ view: "salePick", ...panel.back }),
   saleToList: () => { panel.showToList = true; $("#matches").innerHTML = matchesHtml(); },
-  setStatus: async t => {
-    const id = panel.id, it = S.items[id], to = t.dataset.v, wasSold = isSold(it), toSold = SOLD_STATUSES.includes(to);
-    if (to === it.status) return;
-    if (toSold && !wasSold) return openPanel({ view: "salePay", id, target: to });
-    if (to === "listed" && !wasSold) return openPanel({ view: "list", id, platform: it.platform || "depop" });
-    if (wasSold && !toSold) return askConfirm("Undo this sale?", "Undo sale", async () => {
-      await patchItem(id, { status: to, paid: null, payout: null, payoutEstimated: false, buyer: null, soldAt: null, shippedAt: null, ...(to === "listed" ? {} : { listedAt: null }) });
-      openItem(id);
-    }, () => openItem(id));
-    const patch = { status: to };
-    if (toSold) patch.shippedAt = to === "shipped" ? Date.now() : null;
-    else if (it.status === "listed") patch.listedAt = null;
-    if (await patchItem(id, patch)) openItem(id);
-  },
+  setStatus: t => changeStatus(panel.id, t.dataset.v),
+  statusMenu: openStatusMenu,
+  pickStatus: async t => { const id = $("#statusMenu").dataset.id; closeStatusMenu(); await changeStatus(id, t.dataset.v); if (!panel) focusPill(id); },
   askDelete: t => { const id = t.dataset.id; askConfirm("Delete " + id + "?", "Delete item", async () => {
     const photos = (S.items[id].photos || []).map(p => p.id);
     if (await removeItem(id)) { closePanel(); toast(id + " deleted"); deleteStoredPhotos(photos); } else openItem(id);
@@ -461,12 +484,19 @@ const actions = {
   signOut: () => AUTH.signOut()
 };
 document.addEventListener("click", e => {
+  // Clicking outside the status menu only closes it.
+  if (statusMenuOpen() && !e.target.closest("#statusMenu")) return closeStatusMenu();
   if (e.target.id === "scrim") return closePanel();
   if (e.target.type === "date") return e.target.showPicker();
   const t = e.target.closest("[data-act]"); if (!t) return;
   const fn = actions[t.dataset.act]; if (fn) fn(t);
 });
-document.addEventListener("keydown", e => { if (e.key === "Escape" && panel) closePanel(); });
+document.addEventListener("keydown", e => {
+  if (e.key !== "Escape") return;
+  if (statusMenuOpen()) { closeStatusMenu(); focusPill($("#statusMenu").dataset.id); }
+  else if (panel) closePanel();
+});
+window.addEventListener("resize", closeStatusMenu);
 document.addEventListener("submit", e => {
   e.preventDefault();
   const fn = { add: submitAdd, list: submitList, sale: submitSale }[e.target.dataset.form]; if (fn) fn();
