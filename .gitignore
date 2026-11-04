@@ -14,3 +14,8 @@
 !/icon-512.png
 !/SETUP.md
 !/schema.sql
+!/.github/
+/.github/*
+!/.github/workflows/
+/.github/workflows/*
+!/.github/workflows/pages.yml
