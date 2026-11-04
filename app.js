@@ -16,7 +16,13 @@ function parseMoney(v) {
 
 const BOXES = { fragile: "Fragile", hobby: "Hobby & Tech", soft: "Soft & Collectibles" };
 const PLATFORMS = { depop: "Depop", ebay: "eBay", fb: "Facebook" };
-const STATUSES = { tolist: "To list", listed: "Listed", sold: "Sold", shipped: "Shipped" };
+const STATUSES = { unlisted: "Unlisted", photos: "Needs photos", ready: "To be listed", listed: "Listed", sold: "Sold & Packing", dropoff: "Pending Dropoff", shipped: "Shipped" };
+const SOLD_STATUSES = ["sold", "dropoff", "shipped"], NOT_LISTED = ["unlisted", "photos", "ready"];
+// Items saved before these statuses existed say "tolist". Sorted by photos when loaded; the saved copy changes on their next status change.
+function sortOldToList(items) {
+  Object.values(items).forEach(it => { if (it.status === "tolist") it.status = (it.photos || []).length || it.driveUrl ? "ready" : "photos"; });
+  return items;
+}
 // <input type="date"> values are local calendar days. soldAt is stored in ms at local noon so the day can't shift across time zones.
 const pad2 = n => String(n).padStart(2, "0");
 const dayValue = d => d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate());
@@ -130,7 +136,7 @@ async function addNewItem(fields) {
   for (let tries = 0; tries < 5; tries++) {
     const { yy, head, n } = nextSkuNumber(), num = n + bump, sku = head + String(num).padStart(4, "0");
     const now = Date.now();
-    const item = { sku, photos: [], driveUrl: "", status: "tolist", price: null, platform: null, paid: null, payout: null, payoutEstimated: false, buyer: null, createdAt: now, updatedAt: now, listedAt: null, soldAt: null, shippedAt: null, ...fields };
+    const item = { sku, photos: [], driveUrl: "", status: "photos", price: null, platform: null, paid: null, payout: null, payoutEstimated: false, buyer: null, createdAt: now, updatedAt: now, listedAt: null, soldAt: null, shippedAt: null, ...fields };
     try { await createItem(sku, item); saveMeta({ skuYear: yy, skuNext: num + 1 }); renderList(); return sku; }
     catch (e) { if (e && e.code === "23505") { bump++; continue; } throw e; }
   }
@@ -173,9 +179,11 @@ async function addPhotos(id, files) {
   }
   if (added.length) {
     const cur = S.items[id];
-    const ok = cur && await patchItem(id, { photos: [...(cur.photos || []), ...added] });
+    const nowReady = cur && cur.status === "photos";
+    const ok = cur && await patchItem(id, { photos: [...(cur.photos || []), ...added], ...(nowReady ? { status: "ready" } : {}) });
     if (!ok) { await deleteStoredPhotos(added.map(p => p.id)); return; }
     renderPhotoStrip(id);
+    if (nowReady) $$('[data-act="setStatus"]').forEach(c => c.classList.toggle("on", c.dataset.v === "ready"));
   }
   if (failed.length) toast(photoErrMsg(failed), { err: true });
   else toast(added.length === 1 ? "Photo saved" : added.length + " photos saved");
@@ -188,19 +196,18 @@ const thumb = (it, cls = "ph") => {
 };
 const titleLine = it => `<div class="title"><span class="sku">${h(it.sku)}</span><span class="name">${h(it.name)}</span></div>`;
 const boxName = it => BOXES[it.box] || "No box";
-const isSold = it => it.status === "sold" || it.status === "shipped";
+const isSold = it => SOLD_STATUSES.includes(it.status);
 const flag = t => `<span class="flag">${h(t)}</span>`;
 
-function rowRight(it) {
-  if (it.status === "tolist") return `<button class="btn" data-act="openList" data-id="${h(it.sku)}">Mark listed</button>`;
-  if (it.status === "listed") return it.price == null ? flag("Needs price") : `<div class="amt"><b>${money(it.price)}</b><small>${h(PLATFORMS[it.platform] || "No platform")}</small></div>`;
-  if (it.status === "sold") return `<button class="btn" data-act="ship" data-id="${h(it.sku)}">Mark shipped</button>`;
-  return it.payout == null ? flag("Needs payout") : `<div class="amt"><b class="good">${money(it.payout)}</b><small>${it.payoutEstimated ? "Estimated payout" : "Payout"}</small></div>`;
+function statusPill(it) {
+  const day = it.status === "listed" ? soldDay(it.listedAt) : "";
+  const date = day ? " · " + new Date(dayToMs(day)).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : "";
+  return `<span class="pill s-${h(it.status)}">${h(STATUSES[it.status])}${date}</span>`;
 }
 function rowSub(it) {
   const parts = [h(boxName(it))];
-  if (S.q || S.tab === "all") parts.push(h(STATUSES[it.status]));
-  if (it.status === "sold") parts.push(it.payout == null ? "Needs payout" : `Sold for ${money(it.paid)} · ${it.payoutEstimated ? "Estimated payout" : "Payout"} ${money(it.payout)}`);
+  if (it.status === "listed") parts.push(it.price == null ? flag("Needs price") : `${money(it.price)} · ${h(PLATFORMS[it.platform] || "No platform")}`);
+  if (isSold(it)) parts.push(it.payout == null ? flag("Needs payout") : `Sold for ${money(it.paid)} · ${it.payoutEstimated ? "Estimated payout" : "Payout"} ${money(it.payout)}`);
   return parts.join(" · ");
 }
 function renderSummary() {
@@ -218,7 +225,7 @@ function renderList() {
   $("#tabs").innerHTML = tabBtn("all", "All", all.length) + Object.keys(STATUSES).map(k => tabBtn(k, STATUSES[k], all.filter(i => i.status === k).length)).join("");
   const needle = S.q.trim().toLowerCase();
   const rows = (needle ? all.filter(i => (i.sku + " " + i.name).toLowerCase().includes(needle)) : all.filter(i => S.tab === "all" || i.status === S.tab)).sort(newestFirst);
-  $("#list").innerHTML = rows.length ? rows.map(it => `<div class="row" data-act="openItem" data-id="${h(it.sku)}">${thumb(it)}<div class="grow">${titleLine(it)}<div class="sub">${rowSub(it)}</div></div><div class="right">${rowRight(it)}</div></div>`).join("") : `<div class="empty">${needle ? "No items match that." : "No items here."}</div>`;
+  $("#list").innerHTML = rows.length ? rows.map(it => `<div class="row" data-act="openItem" data-id="${h(it.sku)}">${thumb(it)}<div class="grow">${titleLine(it)}<div class="sub">${rowSub(it)}</div></div><div class="right">${statusPill(it)}</div></div>`).join("") : `<div class="empty">${needle ? "No items match that." : "No items here."}</div>`;
 }
 
 /* ---------- panel ---------- */
@@ -263,7 +270,7 @@ async function submitAdd() {
   const btn = $("#addGo"); btn.disabled = true; const files = panel.files || [];
   try {
     const sku = await addNewItem({ name, box: panel.box });
-    S.q = ""; $("#search").value = ""; S.tab = "tolist"; renderList();
+    S.q = ""; $("#search").value = ""; S.tab = files.length ? "ready" : "photos"; renderList();
     openPanel({ view: "created", id: sku });
     addPhotos(sku, files);
   } catch (e) { console.error("Add failed", e); btn.disabled = false; fieldErr("addErr", saveErrMsg(e)); }
@@ -305,10 +312,10 @@ function rankMatches(items, paid) {
 }
 function matchesHtml() {
   const paid = parseMoney(panel.paid);
-  const pool = Object.values(S.items).filter(i => i.status === "listed" || (panel.showToList && i.status === "tolist"));
+  const pool = Object.values(S.items).filter(i => i.status === "listed" || (panel.showToList && NOT_LISTED.includes(i.status)));
   const row = it => `<div class="row" data-act="salePick" data-id="${h(it.sku)}">${thumb(it)}<div class="grow">${titleLine(it)}<div class="sub">${h(boxName(it))} · ${h(PLATFORMS[it.platform] || STATUSES[it.status])}</div></div><div class="amt"><b>${it.price == null ? "No price" : money(it.price)}</b>${paid != null && it.price === paid ? "<small class='good'>Exact</small>" : ""}</div></div>`;
   return (pool.length ? rankMatches(pool, paid).map(row).join("") : `<div class="empty">No listed items yet.</div>`) +
-    (panel.showToList ? "" : `<button type="button" class="link" data-act="saleToList">Show To list items too</button>`);
+    (panel.showToList ? "" : `<button type="button" class="link" data-act="saleToList">Show items not listed yet</button>`);
 }
 function salePickView() {
   return `<h2>Record sale</h2><label class="f">Sold for<input id="salePaid" inputmode="decimal" autocomplete="off" placeholder="14.99" value="${h(panel.paid || "")}" autofocus></label><div id="matches">${matchesHtml()}</div>`;
@@ -332,7 +339,8 @@ async function submitSale() {
   if (!day) return fieldErr("payErr", "Pick the sale date first.");
   if (day > today()) return fieldErr("payErr", "The sale date can't be in the future.");
   const id = panel.id, buyer = $("#payBuyer").value.trim() || null;
-  if (await patchItem(id, { status: "sold", paid, payout, payoutEstimated: false, buyer, soldAt: dayToMs(day) })) { S.q = ""; $("#search").value = ""; S.tab = "sold"; renderList(); openPanel({ view: "saleDone", id }); }
+  const status = panel.target || "sold";
+  if (await patchItem(id, { status, paid, payout, payoutEstimated: false, buyer, soldAt: dayToMs(day), shippedAt: status === "shipped" ? Date.now() : null })) { S.q = ""; $("#search").value = ""; S.tab = status; renderList(); openPanel({ view: "saleDone", id }); }
 }
 function saleDoneView() {
   const it = S.items[panel.id];
@@ -344,22 +352,16 @@ function saleDoneView() {
 function itemView() {
   const it = S.items[panel.id]; if (!it) return `<p class="err">That item no longer exists.</p>`;
   const id = h(it.sku), sold = isSold(it);
-  const actions = {
-    tolist: `<button class="btn primary" data-act="openList" data-id="${id}">Mark listed</button>`,
-    listed: `<button class="btn primary" data-act="saleFromItem" data-id="${id}">Mark sold</button><button class="btn" data-act="unlist" data-id="${id}">Move to To list</button>`,
-    sold: `<button class="btn primary" data-act="ship" data-id="${id}">Mark shipped</button><button class="btn" data-act="askUndoSale" data-id="${id}">Undo sale</button>`,
-    shipped: `<button class="btn" data-act="unship" data-id="${id}">Move back to Sold</button>`
-  }[it.status];
-  return `<div class="sku">${id}</div><p class="muted status">${STATUSES[it.status]}</p>
+  return `<div class="sku">${id}</div>
+    <div class="f status">Status<div class="chips">${Object.keys(STATUSES).map(k => `<button type="button" class="chip${it.status === k ? " on" : ""}" data-act="setStatus" data-v="${k}">${h(STATUSES[k])}</button>`).join("")}</div></div>
     <div id="photoStrip">${photoStripHtml(it)}</div>
     <button type="button" class="drop small" id="drop" data-act="pickFiles">Drag photos here<small>or click to choose</small></button>
     ${it.driveUrl ? `<a class="link" href="${h(it.driveUrl)}" target="_blank" rel="noopener">Open photos in Google Drive</a>` : ""}
     <label class="f">Name<input data-field="name" autocomplete="off" value="${h(it.name)}"></label>
     <div class="f">Box${chips("itemBox", BOXES, it.box)}</div>
-    ${it.status === "tolist" ? "" : `<label class="f">Listed price<input data-field="price" inputmode="decimal" autocomplete="off" value="${it.price != null ? h(it.price) : ""}"></label><div class="f">Where${chips("itemPlatform", PLATFORMS, it.platform)}</div>`}
+    ${NOT_LISTED.includes(it.status) ? "" : `<label class="f">Listed price<input data-field="price" inputmode="decimal" autocomplete="off" value="${it.price != null ? h(it.price) : ""}"></label><div class="f">Where${chips("itemPlatform", PLATFORMS, it.platform)}</div><label class="f">Listed date<input data-field="listedAt" type="date" max="${today()}" value="${h(soldDay(it.listedAt))}"></label>`}
     ${sold ? `<label class="f">Sold for<input data-field="paid" inputmode="decimal" autocomplete="off" value="${it.paid != null ? h(it.paid) : ""}"></label><label class="f">Total payout${it.payoutEstimated ? ' <span class="flag">Estimated</span>' : ""}<input data-field="payout" inputmode="decimal" autocomplete="off" value="${it.payout != null ? h(it.payout) : ""}"></label><label class="f">Buyer username<input data-field="buyer" autocomplete="off" autocapitalize="off" spellcheck="false" value="${h(it.buyer || "")}"></label><label class="f">Sale date<input data-field="soldAt" type="date" max="${today()}" value="${h(soldDay(it.soldAt))}"></label>` : ""}
     <p class="err" id="itemErr" hidden></p>
-    <div class="btns">${actions}</div>
     <button class="link danger" data-act="askDelete" data-id="${id}">Delete item</button>`;
 }
 function photoStripHtml(it) {
@@ -381,10 +383,10 @@ async function saveField(input) {
     if (v !== (it.buyer || null)) patchItem(id, { buyer: v });
     return;
   }
-  if (field === "soldAt") {
+  if (field === "soldAt" || field === "listedAt") {
     const day = input.value;
-    if (day > today()) { input.value = soldDay(it.soldAt); return fieldErr("itemErr", "The sale date can't be in the future, so it wasn't saved."); }
-    if (day !== soldDay(it.soldAt)) patchItem(id, { soldAt: day ? dayToMs(day) : null });
+    if (day > today()) { input.value = soldDay(it[field]); return fieldErr("itemErr", `The ${field === "soldAt" ? "sale" : "listed"} date can't be in the future, so it wasn't saved.`); }
+    if (day !== soldDay(it[field])) patchItem(id, { [field]: day ? dayToMs(day) : null });
     return;
   }
   const blank = input.value.trim() === "", v = blank ? null : parseMoney(input.value);
@@ -430,11 +432,20 @@ const actions = {
   salePick: t => { panel = { view: "salePay", id: t.dataset.id, paid: panel.paid, back: { paid: panel.paid, showToList: panel.showToList } }; openPanel(panel); },
   saleBack: () => openPanel({ view: "salePick", ...panel.back }),
   saleToList: () => { panel.showToList = true; $("#matches").innerHTML = matchesHtml(); },
-  saleFromItem: t => openPanel({ view: "salePay", id: t.dataset.id }),
-  ship: async t => { const id = t.dataset.id; if (await patchItem(id, { status: "shipped", shippedAt: Date.now() })) { if (panel && panel.view === "item") openItem(id); toast(id + " shipped"); } },
-  unship: async t => { const id = t.dataset.id; if (await patchItem(id, { status: "sold", shippedAt: null })) openItem(id); },
-  unlist: async t => { const id = t.dataset.id; if (await patchItem(id, { status: "tolist", listedAt: null })) openItem(id); },
-  askUndoSale: t => { const id = t.dataset.id; askConfirm("Undo this sale?", "Undo sale", async () => { await patchItem(id, { status: "listed", paid: null, payout: null, payoutEstimated: false, buyer: null, soldAt: null, shippedAt: null }); openItem(id); }, () => openItem(id)); },
+  setStatus: async t => {
+    const id = panel.id, it = S.items[id], to = t.dataset.v, wasSold = isSold(it), toSold = SOLD_STATUSES.includes(to);
+    if (to === it.status) return;
+    if (toSold && !wasSold) return openPanel({ view: "salePay", id, target: to });
+    if (to === "listed" && !wasSold) return openPanel({ view: "list", id, platform: it.platform || "depop" });
+    if (wasSold && !toSold) return askConfirm("Undo this sale?", "Undo sale", async () => {
+      await patchItem(id, { status: to, paid: null, payout: null, payoutEstimated: false, buyer: null, soldAt: null, shippedAt: null, ...(to === "listed" ? {} : { listedAt: null }) });
+      openItem(id);
+    }, () => openItem(id));
+    const patch = { status: to };
+    if (toSold) patch.shippedAt = to === "shipped" ? Date.now() : null;
+    else if (it.status === "listed") patch.listedAt = null;
+    if (await patchItem(id, patch)) openItem(id);
+  },
   askDelete: t => { const id = t.dataset.id; askConfirm("Delete " + id + "?", "Delete item", async () => {
     const photos = (S.items[id].photos || []).map(p => p.id);
     if (await removeItem(id)) { closePanel(); toast(id + " deleted"); deleteStoredPhotos(photos); } else openItem(id);
@@ -509,7 +520,7 @@ async function startSync() {
   try { if (!(await STORE.get("shopmeta", "profile"))) await convertOldData(); }
   catch (e) { console.error("Couldn't set up data", e); return showFatal("Couldn't load your shop. Nothing was lost. Check your connection, then reload."); }
   const fail = () => { $("#syncErr").hidden = false; };
-  STORE.watch("shop", m => { $("#syncErr").hidden = true; S.items = m; S.loaded = true; renderList(); }, fail);
+  STORE.watch("shop", m => { $("#syncErr").hidden = true; S.items = sortOldToList(m); S.loaded = true; renderList(); }, fail);
   STORE.watch("shopmeta", m => { S.meta = m.profile || {}; }, fail);
 }
 function startLocal() {
@@ -524,6 +535,7 @@ function startLocal() {
     console.info("Converted old data", S.meta.conversionReport);
     persistLocal();
   }
+  sortOldToList(S.items);
   S.loaded = true; renderList();
 }
 function showLogin() {
