@@ -49,7 +49,7 @@ function toast(msg, { err = false } = {}) {
 const saveErrMsg = e => e && /JWT|auth/i.test(e.message || "") ? "You've been signed out. Reload and sign in again." : "Couldn't save. Check your connection and try again.";
 
 /* ---------- data ---------- */
-const S = { items: {}, meta: {}, tab: "all", q: "", loaded: false, metaLoaded: false };
+const S = { items: {}, meta: {}, tab: "all", q: "", view: "inv", loaded: false, metaLoaded: false };
 // SKUs and backups need both, or a new item could reuse a SKU and a backup could come out empty.
 const shopReady = () => S.loaded && S.metaLoaded;
 const needsShop = fn => t => shopReady() ? fn(t) : toast("Your shop hasn't loaded yet. Try again in a moment, or reload.", { err: true });
@@ -251,6 +251,7 @@ function renderSummary() {
 }
 function renderList() {
   if (!S.loaded) return;
+  if (S.view === "sales") scheduleSales();
   renderSummary();
   const all = Object.values(S.items);
   const tabBtn = (k, label, n) => `<button class="tab${S.tab === k && !S.q ? " on" : ""}" data-act="tab" data-v="${k}">${label} <span>${n}</span></button>`;
@@ -588,6 +589,224 @@ function saveBackup() {
   document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 2000); toast("Backup saved");
 }
 
+/* ---------- Depop fee math ---------- */
+// From Depop's "Seller fees and charges" and "Boosted Listings Policy" (US, listings from 23 Mar 2026): no selling fee,
+// processing is charged on item + shipping + tax, boost on the item price only when a Depop label is used.
+// The buyer pays for the label, so shipping and tax raise the processing fee but don't come out of the payout themselves.
+const FEE_DEFAULTS = { ratePct: 3.3, fixed: 0.45, boostPct: 12, ship: 5, taxPct: 6, listPrice: 10, sendPrice: 9, acceptPrice: 8, boosted: false, sendOn: false, acceptOn: false };
+const RATE_KEYS = ["ratePct", "fixed", "boostPct"];
+const F = (() => {
+  const raw = localStorage.getItem("mb-fees"); if (!raw) return { ...FEE_DEFAULTS };
+  try { return { ...FEE_DEFAULTS, ...JSON.parse(raw) }; }
+  catch (e) { console.error("Fee settings unreadable", e); toast("Saved fee settings couldn't be read, so the defaults are showing.", { err: true }); return { ...FEE_DEFAULTS }; }
+})();
+const saveFees = () => localStorage.setItem("mb-fees", JSON.stringify(F));
+const signedMoney = n => n < 0 ? "-" + money(-n) : money(n);
+function feeBreakdown(price, boosted = F.boosted) {
+  const base = price + F.ship, tax = cents(base * F.taxPct / 100), proc = cents((base + tax) * F.ratePct / 100 + F.fixed), boost = boosted ? cents(price * F.boostPct / 100) : 0;
+  return { price, tax, buyer: cents(base + tax), proc, boost, fees: cents(proc + boost), payout: cents(price - proc - boost) };
+}
+// Fees round to the cent, so an exact payout isn't always possible. This finds the lowest price that pays at least the target.
+function priceForPayout(target, boosted) {
+  const k = 1 + F.taxPct / 100, r = F.ratePct / 100, b = boosted ? F.boostPct / 100 : 0, den = 1 - r * k - b;
+  if (den <= 0) return null;
+  const start = Math.max(0, Math.floor((target + F.fixed + r * F.ship * k) / den * 100) - 3);
+  for (let c = start; c < start + 8; c++) if (feeBreakdown(c / 100, boosted).payout >= target) return c / 100;
+  return null;
+}
+// Works back from any number in the formula to the item price. Returns null when that number can't happen at these settings.
+function solvePrice(field, v, boosted) {
+  const k = 1 + F.taxPct / 100, r = F.ratePct / 100, b = boosted ? F.boostPct / 100 : 0;
+  const p = field === "payout" ? priceForPayout(v, boosted)
+    : field === "proc" ? (v - F.fixed) / (r * k) - F.ship
+    : field === "boost" ? v / b
+    : field === "fees" ? (v - F.fixed - r * F.ship * k) / (r * k + b)
+    : field === "buyer" ? v / k - F.ship : field === "price" ? v : null;
+  return p == null || !Number.isFinite(p) || p < 0 ? null : cents(p);
+}
+const parseNum = v => { const s = String(v).replace(/[$,%\s]/g, ""); return /^(\d+\.?\d*|\.\d+)$/.test(s) ? Number(s) : null; };
+
+/* ---------- left menu ---------- */
+const VIEWS = { inv: "Inventory", table: "Payout Table", calc: "Fee Calculator", sales: "Sales" };
+function setView(v) {
+  S.view = VIEWS[v] ? v : "inv"; sessionStorage.setItem("mb-view", S.view);
+  $("#rail").innerHTML = Object.keys(VIEWS).map(k => `<button class="rail-btn${S.view === k ? " on" : ""}" data-act="view" data-v="${k}"${S.view === k ? ' aria-current="page"' : ""}>${VIEWS[k]}</button>`).join("");
+  $("#viewInv").hidden = S.view !== "inv"; $("#viewTool").hidden = S.view === "inv";
+  $(".wrap").classList.toggle("wide", S.view === "sales" || S.view === "calc");
+  $("#viewTool").innerHTML = S.view === "table" ? tableViewHtml() : S.view === "calc" ? calcViewHtml() : S.view === "sales" ? salesViewHtml() : "";
+  if (S.view === "table" || S.view === "calc") drawFees();
+  if (S.view === "sales") drawSales();
+  scrollTo(0, 0);
+}
+const feeField = (key, label, suffix = "") => `<label class="f">${label}<input data-fee="${key}" inputmode="decimal" autocomplete="off"${suffix ? ` aria-label="${h(label)} ${suffix}"` : ""}></label>`;
+const taxHint = `<p class="muted hint">Tax follows the buyer's state, not yours. Michigan buyers pay 6%.</p>`;
+
+/* Payout Table */
+const TABLE_PRICES = [...Array(20).keys()].map(i => i + 1).concat([25, 30, 35, 40, 45, 50, 60, 70, 80, 90, 100]);
+const tableVals = p => { const a = feeBreakdown(p, false), b = feeBreakdown(p, true); return { buyer: a.buyer, proc: a.proc, payout: a.payout, boost: b.boost, boosted: b.payout }; };
+const moneyTd = (key, v, attr = "") => `<td class="${key === "payout" || key === "boosted" ? "strong" : ""}${v < 0 ? " neg" : ""}"${attr}>${signedMoney(v)}</td>`;
+const tableKeys = ["buyer", "proc", "payout", "boost", "boosted"];
+function tableViewHtml() {
+  return `<h2>Payout Table</h2><div class="fee-settings">${feeField("ship", "Shipping buyer pays ($)")}${feeField("taxPct", "Buyer's sales tax (%)")}</div>${taxHint}
+    <div class="sheet-wrap"><table class="sheet money-table"><thead><tr><th>Listed</th><th>Buyer pays</th><th>Processing</th><th>Payout</th><th>Boost fee</th><th>Boosted payout</th></tr></thead>
+    <tbody><tr class="try"><td><input class="cell" id="tryPrice" inputmode="decimal" autocomplete="off" placeholder="Any price" aria-label="Try any listed price"></td>${tableKeys.map(k => `<td data-try="${k}">—</td>`).join("")}</tr></tbody><tbody id="feeBody"></tbody></table></div>`;
+}
+function drawTable() {
+  $("#feeBody").innerHTML = TABLE_PRICES.map(p => { const v = tableVals(p); return `<tr><td>${money(p)}</td>${tableKeys.map(k => moneyTd(k, v[k])).join("")}</tr>`; }).join("");
+  const p = parseMoney($("#tryPrice").value), v = p == null ? null : tableVals(p);
+  $$("[data-try]").forEach(td => { const n = v ? v[td.dataset.try] : null; td.textContent = v ? signedMoney(n) : "—"; td.classList.toggle("neg", !!v && n < 0); td.classList.toggle("strong", td.dataset.try === "payout" || td.dataset.try === "boosted"); });
+}
+
+/* Fee Calculator: type in any box and the rest follow */
+const CALC_ROWS = { list: ["Listed price", "listPrice"], send: ["Auto-send offer", "sendPrice"], accept: ["Auto-accept lowest price", "acceptPrice"] };
+const calcField = (key, field, label) => `<label class="f${field === "payout" ? " payout" : ""}">${label}<input data-calc="${key}:${field}" inputmode="decimal" autocomplete="off"></label>`;
+const calcCheck = (key, label) => `<label class="check"><input type="checkbox" data-toggle="${key}">${label}</label>`;
+function calcViewHtml() {
+  const card = key => `<section class="calc-card" data-card="${key}"><h3>${CALC_ROWS[key][0]}</h3><div class="calc-grid">${calcField(key, "price", "Price")}${key === "list" ? "" : calcField(key, "off", "% off listed")}${calcField(key, "buyer", "Buyer pays")}${calcField(key, "proc", "Processing fee")}${calcField(key, "boost", "Boost fee")}${calcField(key, "fees", "Total fees")}${calcField(key, "payout", "Your payout")}</div></section>`;
+  return `<h2>Fee Calculator</h2><div class="checks calc-toggles">${calcCheck("boosted", "Boosted")}${calcCheck("sendOn", "Auto-send offers")}${calcCheck("acceptOn", "Auto-accept offers")}</div>
+    <div class="fee-settings">${feeField("ship", "Shipping buyer pays ($)")}${feeField("taxPct", "Buyer's sales tax (%)")}</div>${taxHint}
+    ${Object.keys(CALC_ROWS).map(card).join("")}
+    <p class="warn" id="calcNote" hidden></p>
+    <details class="rates"><summary>Depop rates</summary><div class="fee-settings">${feeField("ratePct", "Processing (%)")}${feeField("fixed", "Flat fee ($)")}${feeField("boostPct", "Boost (%)")}</div><button type="button" class="link" data-act="resetRates">Reset to Depop's rates</button></details>`;
+}
+function calcNote(msg) { const n = $("#calcNote"); if (n) { n.textContent = msg || ""; n.hidden = !msg; } }
+function drawCalc(active) {
+  $$("[data-toggle]").forEach(c => { c.checked = !!F[c.dataset.toggle]; });
+  $('[data-card="send"]').hidden = !F.sendOn; $('[data-card="accept"]').hidden = !F.acceptOn;
+  $$("[data-calc]").forEach(el => {
+    if (el === active) return;
+    const [key, field] = el.dataset.calc.split(":"), price = F[CALC_ROWS[key][1]], b = feeBreakdown(price);
+    el.value = field === "off" ? String(F.listPrice > 0 ? Math.round((1 - price / F.listPrice) * 1000) / 10 : 0) : b[field].toFixed(2);
+    el.disabled = field === "boost" && !F.boosted;
+    el.classList.toggle("neg", field === "payout" && b.payout < 0);
+  });
+}
+function drawFees(active) {
+  $$("[data-fee]").forEach(el => { if (el !== active) el.value = F[el.dataset.fee]; });
+  if (S.view === "table") drawTable(); else if (S.view === "calc") drawCalc(active);
+}
+function offerWarning() {
+  const w = [];
+  if (F.sendOn && F.sendPrice > F.listPrice) w.push("Auto-send offer is above the listed price.");
+  if (F.acceptOn && F.acceptPrice > F.listPrice) w.push("Auto-accept price is above the listed price.");
+  if (F.sendOn && F.acceptOn && F.sendPrice < F.acceptPrice) w.push("Auto-send offer is below your auto-accept price.");
+  return w.join(" ");
+}
+function calcInput(el) {
+  const [key, field] = el.dataset.calc.split(":"), priceKey = CALC_ROWS[key][1], v = parseMoney(el.value);
+  el.classList.remove("bad"); calcNote("");
+  if (el.value.trim() === "") return;
+  if (field === "off" ? parseNum(el.value) == null || parseNum(el.value) > 100 : v == null) { el.classList.add("bad"); return calcNote("That isn't a usable number."); }
+  const p = field === "off" ? cents(F.listPrice * (1 - parseNum(el.value) / 100)) : solvePrice(field, v, F.boosted);
+  if (p == null) { el.classList.add("bad"); return calcNote("That can't happen at these fee settings."); }
+  F[priceKey] = p; saveFees(); drawFees(el);
+  const got = feeBreakdown(p);
+  const off = field !== "off" && field !== "price" && got[field] !== v;
+  calcNote([off ? `Fees round to the cent, so the closest is ${money(p)}, which gives ${money(got[field])}.` : "", offerWarning()].filter(Boolean).join(" "));
+}
+function feeInput(el) {
+  const key = el.dataset.fee, v = parseNum(el.value);
+  el.classList.remove("bad");
+  if (el.value.trim() === "") return;
+  if (v == null || (key !== "ship" && key !== "fixed" && v >= 100)) return el.classList.add("bad");
+  F[key] = v; saveFees(); drawFees(el);
+}
+
+/* Sales sheet: every cell saves to the item, the same as its item page */
+const SH = { q: "", plat: "", month: "", sort: "date", dir: -1 };
+const SALES_COLS = { date: "Date", sku: "SKU", platform: "Platform", buyer: "Buyer", paid: "Sold for ($)", fees: "Fees", payout: "Total Payout" };
+const feesOf = it => it.paid != null && it.payout != null ? cents(it.paid - it.payout) : null;
+const salesKey = { date: i => soldDay(i.soldAt) || null, sku: i => String(i.sku), platform: i => PLATFORMS[i.platform] || null, buyer: i => i.buyer ? i.buyer.toLowerCase() : null, paid: i => i.paid, fees: feesOf, payout: i => i.payout };
+function salesRows() {
+  const q = SH.q.trim().toLowerCase(), key = salesKey[SH.sort];
+  return Object.values(S.items).filter(isSold)
+    .filter(i => (!q || (i.sku + " " + i.name + " " + (i.buyer || "")).toLowerCase().includes(q)) && (!SH.plat || i.platform === SH.plat) && (!SH.month || soldDay(i.soldAt).startsWith(SH.month)))
+    .sort((a, b) => {
+      const x = key(a), y = key(b);
+      if (x == null || y == null) return x == null && y == null ? newestFirst(a, b) : x == null ? 1 : -1; // blanks stay last in both directions
+      const c = typeof x === "number" ? x - y : String(x).localeCompare(String(y), undefined, { numeric: true });
+      return (c * SH.dir) || newestFirst(a, b);
+    });
+}
+function salesViewHtml() {
+  return `<h2>Sales</h2><div class="tools"><input id="salesQ" type="search" placeholder="Search SKU, name or buyer" autocomplete="off" aria-label="Search sales" value="${h(SH.q)}">
+    <select id="salesPlat" aria-label="Platform"><option value="">All platforms</option>${Object.keys(PLATFORMS).map(k => `<option value="${k}"${SH.plat === k ? " selected" : ""}>${PLATFORMS[k]}</option>`).join("")}</select>
+    <select id="salesMonth" aria-label="Month"></select>
+    <button class="btn" data-act="salesCsv">Export CSV</button><button class="btn primary" data-act="sale">Record sale</button></div>
+    <div class="sheet-wrap"><table class="sheet sales-sheet"><thead id="salesHead"></thead><tbody id="salesBody"></tbody><tfoot id="salesFoot"></tfoot></table></div><p class="muted hint" id="salesNote" hidden></p>`;
+}
+const moneyCell = (it, col, v) => `<td class="${col === "payout" ? "strong" : ""}"><input class="cell${col === "payout" && it.payoutEstimated ? " est" : ""}" data-sheet="${col}" data-id="${h(it.sku)}" inputmode="decimal" autocomplete="off" aria-label="${SALES_COLS[col]}, ${h(it.sku)}" value="${v == null ? "" : Number(v).toFixed(2)}"></td>`;
+function salesRowHtml(it) {
+  const id = h(it.sku);
+  const platforms = (PLATFORMS[it.platform] ? "" : `<option value="" selected></option>`) + Object.keys(PLATFORMS).map(k => `<option value="${k}"${it.platform === k ? " selected" : ""}>${PLATFORMS[k]}</option>`).join("");
+  return `<tr><td><input class="cell" type="date" max="${today()}" data-sheet="date" data-id="${id}" aria-label="Date, ${id}" value="${h(soldDay(it.soldAt))}"></td>
+    <td class="sku-cell"><button class="link" data-act="openItem" data-id="${id}" title="${h(it.name)}">${id}</button>${it.bundleId ? ' <span class="muted">Bundle</span>' : ""}</td>
+    <td><select class="cell" data-sheet="platform" data-id="${id}" aria-label="Platform, ${id}">${platforms}</select></td>
+    <td><input class="cell" data-sheet="buyer" data-id="${id}" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Buyer, ${id}" value="${h(it.buyer || "")}"></td>
+    ${moneyCell(it, "paid", it.paid)}${moneyCell(it, "fees", feesOf(it))}${moneyCell(it, "payout", it.payout)}</tr>`;
+}
+function drawSales() {
+  if (S.view !== "sales" || !$("#salesBody")) return;
+  if (!S.loaded) { $("#salesBody").innerHTML = `<tr><td colspan="7" class="empty">Loading your shop…</td></tr>`; return; }
+  // A redraw (often from another device) keeps your place: the same cell stays focused, with anything half typed.
+  const a = document.activeElement, spot = a && a.dataset && a.dataset.sheet ? { id: a.dataset.id, col: a.dataset.sheet, typed: a.value !== a.defaultValue ? a.value : null } : null;
+  const sold = Object.values(S.items).filter(isSold);
+  const months = [...new Set(sold.map(i => soldDay(i.soldAt).slice(0, 7)).filter(Boolean))].sort().reverse();
+  const monthName = m => new Date(Number(m.slice(0, 4)), Number(m.slice(5, 7)) - 1, 1).toLocaleString("en-US", { month: "short", year: "numeric" });
+  if (SH.month && !months.includes(SH.month)) SH.month = "";
+  const monthHtml = `<option value="">All dates</option>` + months.map(m => `<option value="${m}"${SH.month === m ? " selected" : ""}>${monthName(m)}</option>`).join("");
+  if ($("#salesMonth").innerHTML !== monthHtml) $("#salesMonth").innerHTML = monthHtml;
+  $("#salesHead").innerHTML = `<tr>${Object.keys(SALES_COLS).map(k => `<th aria-sort="${SH.sort === k ? (SH.dir > 0 ? "ascending" : "descending") : "none"}"><button data-act="salesSort" data-v="${k}">${SALES_COLS[k]}<span>${SH.sort === k ? (SH.dir > 0 ? " ▲" : " ▼") : ""}</span></button></th>`).join("")}</tr>`;
+  const rows = salesRows(), sum = f => rows.reduce((t, i) => t + (Number(f(i)) || 0), 0);
+  $("#salesBody").innerHTML = rows.length ? rows.map(salesRowHtml).join("") : `<tr><td colspan="7" class="empty">${sold.length ? "No sales match that." : "No sales logged yet."}</td></tr>`;
+  $("#salesFoot").innerHTML = `<tr><td colspan="4">${rows.length} ${rows.length === 1 ? "sale" : "sales"}</td><td>${money(sum(i => i.paid))}</td><td>${money(sum(feesOf))}</td><td class="strong">${money(sum(i => i.payout))}</td></tr>`;
+  const est = rows.filter(i => i.payoutEstimated).length, note = $("#salesNote");
+  note.textContent = est ? `Amber payouts are estimates (${est}). Type the receipt's payout to confirm one.` : ""; note.hidden = !est;
+  if (spot) {
+    const el = sheetCell(spot.id, spot.col);
+    if (el) { if (spot.typed != null) el.value = spot.typed; el.focus({ preventScroll: true }); }
+  }
+}
+const sheetCell = (id, col) => $$(`#salesBody [data-sheet="${col}"]`).find(c => c.dataset.id === id);
+// Waits a tick, so Tab or Enter has finished moving to the next cell before the sheet redraws.
+let salesTimer = null;
+const scheduleSales = () => { clearTimeout(salesTimer); salesTimer = setTimeout(drawSales, 0); };
+async function saveSheetCell(el) {
+  const it = S.items[el.dataset.id], col = el.dataset.sheet;
+  if (!it) return toast("That item no longer exists.", { err: true });
+  const refuse = msg => { el.value = el.defaultValue; toast(msg, { err: true }); };
+  if (col === "date") {
+    if (el.value > today()) return refuse("The sale date can't be in the future, so it wasn't saved.");
+    if (el.value !== soldDay(it.soldAt)) await patchItem(it.sku, { soldAt: el.value ? dayToMs(el.value) : null });
+    return;
+  }
+  if (col === "platform") { const others = platformsOf(it).filter(p => p !== el.value); await patchItem(it.sku, { platform: el.value, platforms: [el.value, ...others] }); return; }
+  if (col === "buyer") { const v = el.value.trim() || null; if (v !== (it.buyer || null)) await patchItem(it.sku, { buyer: v }); return; }
+  const blank = el.value.trim() === "", v = blank ? null : parseMoney(el.value);
+  if (!blank && v == null) return refuse("That amount isn't a number, so it wasn't saved.");
+  if (col === "fees") {
+    if (blank) return refuse("Fees are Sold for minus Total Payout. Clear the payout instead.");
+    if (it.paid == null) return refuse("Enter Sold for first, so the fees have something to come out of.");
+    if (v > it.paid) return refuse("Fees can't be more than it sold for, so they weren't saved.");
+    if (v !== feesOf(it)) await patchItem(it.sku, { payout: cents(it.paid - v), payoutEstimated: false });
+    return;
+  }
+  const sale = { paid: it.paid, payout: it.payout, [col]: v };
+  if (sale.paid != null && sale.payout != null && sale.payout > sale.paid) return refuse("The total payout is more than it sold for, so it wasn't saved.");
+  if (v !== it[col]) await patchItem(it.sku, col === "payout" ? { payout: v, payoutEstimated: false } : { paid: v });
+}
+function moveSheetCell(el, dir) {
+  const tr = el.closest("tr"), next = dir > 0 ? tr.nextElementSibling : tr.previousElementSibling, to = next && next.querySelector(`[data-sheet="${el.dataset.sheet}"]`);
+  if (to) { to.focus(); if (to.select && to.type !== "date") to.select(); } else el.blur();
+}
+function salesCsv() {
+  const safe = v => { const s = String(v == null ? "" : v), t = /^[=+\-@]/.test(s) ? "'" + s : s; return /[",\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t; };
+  const num = v => v == null ? "" : Number(v).toFixed(2);
+  const lines = [Object.values(SALES_COLS).join(",")].concat(salesRows().map(i => [soldDay(i.soldAt), i.sku, PLATFORMS[i.platform] || "", i.buyer, num(i.paid), num(feesOf(i)), num(i.payout)].map(safe).join(",")));
+  const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([lines.join("\n")], { type: "text/csv" })); a.download = "mackrobytes-sales.csv";
+  document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+}
+
 /* ---------- events ---------- */
 // Changing a status keeps the current tab, search and scroll position.
 async function changeStatus(id, to) {
@@ -615,6 +834,10 @@ async function changeStatus(id, to) {
 const openItem = id => openPanel({ view: "item", id });
 const actions = {
   close: closePanel,
+  view: t => setView(t.dataset.v),
+  salesSort: t => { const k = t.dataset.v; if (SH.sort === k) SH.dir = -SH.dir; else { SH.sort = k; SH.dir = k === "date" || k === "paid" || k === "fees" || k === "payout" ? -1 : 1; } drawSales(); },
+  salesCsv: needsShop(salesCsv),
+  resetRates: () => { RATE_KEYS.forEach(k => { F[k] = FEE_DEFAULTS[k]; }); saveFees(); drawFees(); },
   tab: t => { S.tab = t.dataset.v; S.q = ""; $("#search").value = ""; renderList(); },
   add: needsShop(() => openPanel({ view: "add" })),
   sale: needsShop(() => openPanel({ view: "salePick" })),
@@ -685,6 +908,10 @@ document.addEventListener("click", e => {
   const fn = actions[t.dataset.act]; if (fn) fn(t);
 });
 document.addEventListener("keydown", e => {
+  const cell = e.target.dataset && e.target.dataset.sheet ? e.target : null;
+  if (cell && e.key === "Escape") { cell.value = cell.defaultValue; cell.blur(); return; }
+  if (cell && e.key === "Enter") { e.preventDefault(); moveSheetCell(cell, e.shiftKey ? -1 : 1); return; }
+  if (cell && cell.tagName === "INPUT" && (e.key === "ArrowDown" || e.key === "ArrowUp") && cell.type !== "date") { e.preventDefault(); moveSheetCell(cell, e.key === "ArrowDown" ? 1 : -1); return; }
   // Enter in the bundle search picks the top match instead of submitting the sale.
   if (e.key === "Enter" && e.target.id === "bundleSearch") { e.preventDefault(); const top = $("#bundleMatches [data-act='bundleAdd']"); if (top) top.click(); return; }
   if (e.key !== "Escape") return;
@@ -703,6 +930,10 @@ document.addEventListener("submit", e => {
 });
 document.addEventListener("input", e => {
   const id = e.target.id;
+  if (e.target.dataset.calc) calcInput(e.target);
+  if (e.target.dataset.fee) feeInput(e.target);
+  if (id === "tryPrice") drawTable();
+  if (id === "salesQ") { SH.q = e.target.value; drawSales(); }
   if (id === "search") { S.q = e.target.value; renderList(); }
   if (id === "salePaid") { panel.paid = e.target.value; $("#matches").innerHTML = matchesHtml(); }
   if (id === "listPrice") { fieldErr("listErr", ""); checkDuplicatePrice(); }
@@ -714,7 +945,19 @@ document.addEventListener("input", e => {
   if (e.target.dataset.bundlePaid) { panel.bundlePaid[e.target.dataset.bundlePaid] = e.target.value; fieldErr("payErr", ""); }
   if (id === "payPaid" || id === "payOut" || e.target.dataset.bundlePaid) showBundleSplit();
 });
+// Leaving a box tidies what was typed (5 becomes 5.00) and puts back anything unusable.
+document.addEventListener("focusout", e => { if (e.target.dataset && (e.target.dataset.calc || e.target.dataset.fee)) { e.target.classList.remove("bad"); drawFees(); } });
 document.addEventListener("change", e => {
+  if (e.target.dataset.sheet) saveSheetCell(e.target);
+  if (e.target.dataset.toggle) {
+    const k = e.target.dataset.toggle; F[k] = e.target.checked;
+    // A new offer starts below the current listed price: 10% off to send, 20% off to accept.
+    if (k === "sendOn" && F.sendOn && F.sendPrice > F.listPrice) F.sendPrice = cents(F.listPrice * .9);
+    if (k === "acceptOn" && F.acceptOn && F.acceptPrice > F.listPrice) F.acceptPrice = cents(F.listPrice * .8);
+    saveFees(); drawFees(); calcNote(offerWarning());
+  }
+  if (e.target.id === "salesPlat") { SH.plat = e.target.value; drawSales(); }
+  if (e.target.id === "salesMonth") { SH.month = e.target.value; drawSales(); }
   if (e.target.dataset.field && panel && panel.view === "item") saveField(e.target);
   if ("plat" in e.target.dataset && panel) { if (panel.view === "item") saveItemPlatforms(); else fieldErr("listErr", ""); }
   if (e.target.id === "fileIn") { handleFiles(e.target.files); e.target.value = ""; }
@@ -739,7 +982,7 @@ window.addEventListener("drop", e => {
 });
 
 /* ---------- start ---------- */
-function showFatal(msg) { S.loaded = false; $("#list").innerHTML = `<div class="empty"><p class="err">${h(msg)}</p><button class="btn" onclick="location.reload()">Reload</button></div>`; }
+function showFatal(msg) { setView("inv"); S.loaded = false; $("#list").innerHTML = `<div class="empty"><p class="err">${h(msg)}</p><button class="btn" onclick="location.reload()">Reload</button></div>`; }
 async function startSync() {
   DB = true; PHOTOS.onReady = refreshPhotos;
   $("#list").innerHTML = `<div class="empty">Loading your shop…</div>`;
@@ -765,6 +1008,7 @@ function showLogin() {
     catch (e) { console.error("Sign-in failed", e); err.textContent = e && e.status === 400 ? "That email and password didn't work." : "Couldn't reach sign-in. Check your connection and try again."; err.hidden = false; }
   };
 }
+setView(sessionStorage.getItem("mb-view"));
 (async () => {
   const configured = window.CONFIG && CONFIG.SUPABASE_URL && !CONFIG.SUPABASE_URL.startsWith("YOUR");
   if (!configured) return startLocal();

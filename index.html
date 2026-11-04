@@ -28,6 +28,8 @@
   </form>
 </section>
 
+<div class="shell">
+<nav class="rail" id="rail" aria-label="Sections"></nav>
 <div class="wrap">
   <header class="top">
     <div class="brand">MackroBytes</div>
@@ -35,6 +37,7 @@
     <span class="err" id="syncErr" hidden>Sync stopped. Reload the app.</span>
     <button class="gear" data-act="settings" aria-label="Settings"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.6" fill="none"/><path d="M12 2.8v3M12 18.2v3M2.8 12h3M18.2 12h3M5.5 5.5l2.1 2.1M16.4 16.4l2.1 2.1M5.5 18.5l2.1-2.1M16.4 7.6l2.1-2.1" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
   </header>
+  <div id="viewInv">
   <section class="summary">
     <div><div class="label">Your payouts</div><div class="main" id="payouts">$0.00</div></div>
     <div class="side"><div>Sold for <span id="paidTotal">$0.00</span></div><div id="estNote"></div></div>
@@ -46,6 +49,9 @@
   </div>
   <nav class="tabbar" id="tabs" aria-label="Status"></nav>
   <main id="list"><div class="empty">Loading your shop…</div></main>
+  </div>
+  <main id="viewTool" hidden></main>
+</div>
 </div>
 
 <div id="scrim" hidden><aside id="panel"></aside></div>
