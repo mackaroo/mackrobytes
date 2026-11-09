@@ -110,7 +110,7 @@ async function addNewItem(fields) {
   for (let tries = 0; tries < 5; tries++) {
     const { yy, head, n } = nextSkuNumber(), num = n + bump, sku = head + String(num).padStart(4, "0");
     const now = Date.now();
-    const item = { sku, photos: [], driveUrl: "", status: "photos", price: null, platform: null, platforms: [], boosted: false, tracking: null, receiptImg: null, labelImg: null, proofImg: null, paid: null, payout: null, payoutEstimated: false, buyer: null, createdAt: now, updatedAt: now, listedAt: null, soldAt: null, shippedAt: null, ...fields };
+    const item = { sku, photos: [], driveUrl: "", status: "photos", price: null, platform: null, platforms: [], boosted: false, tracking: null, receiptImg: null, labelImg: null, proofImg: null, paid: null, payout: null, payoutEstimated: false, buyer: null, createdAt: now, updatedAt: now, listedAt: null, soldAt: null, shippedAt: null, packCheckedAt: null, ...fields };
     try { await createItem(sku, item); saveMeta({ skuYear: yy, skuNext: num + 1 }); renderList(); return sku; }
     catch (e) { if (e && e.code === "23505") { bump++; continue; } throw e; }
   }
@@ -238,6 +238,7 @@ function statusPill(it) {
 }
 function rowSub(it) {
   const parts = [h(boxName(it))];
+  if (isSold(it)) parts.push(it.buyer ? "To " + h(it.buyer) : it.status === "shipped" ? "No buyer" : flag("Needs buyer"));
   if (it.status === "listed") parts.push(it.price == null ? flag("Needs price") : `${money(it.price)} · ${h(platformNames(it) || "No platform")}`);
   if (isSold(it)) parts.push(it.payout == null ? flag("Needs payout") : `${it.paid == null ? flag("Needs sold price") : "Sold for " + money(it.paid)} · ${it.payoutEstimated ? "Estimated payout" : "Payout"} ${money(it.payout)}${bundlePartners(it).length ? " · Bundle" : ""}`);
   return parts.join(" · ");
@@ -283,8 +284,8 @@ let panel = null;
 function openPanel(p) { panel = p; drawPanel(); $("#scrim").hidden = false; const f = $("#panel [autofocus]"); if (f) f.focus(); }
 function closePanel() { panel = null; $("#scrim").hidden = true; $("#panel").innerHTML = ""; }
 function drawPanel() {
-  const views = { add: addView, created: createdView, list: listView, salePick: salePickView, salePay: salePayView, saleDone: saleDoneView, ship: shipView, record: recordView, item: itemView, confirm: confirmView, settings: settingsView };
-  $("#panel").classList.toggle("pop", ["list", "salePay", "ship"].includes(panel.view));
+  const views = { add: addView, created: createdView, list: listView, salePick: salePickView, salePay: salePayView, saleDone: saleDoneView, pack: packView, ship: shipView, record: recordView, item: itemView, confirm: confirmView, settings: settingsView };
+  $("#panel").classList.toggle("pop", ["list", "salePay", "pack", "ship"].includes(panel.view));
   $("#panel").innerHTML = `<button class="x" data-act="close" aria-label="Close">×</button>` + (panel.id && !S.items[panel.id] ? `<p class="err">That item no longer exists.</p>` : views[panel.view]());
 }
 const fieldErr = (id, msg) => { const e = $("#" + id); if (e) { e.textContent = msg || ""; e.hidden = !msg; } };
@@ -367,19 +368,24 @@ async function submitList() {
 
 /* Record sale */
 // Exact price first, then closest price, then items with no price. Never empty while anything is listed.
-function rankMatches(items, paid) {
+// Words from the receipt title rank first, then exact price, then closest price, then items with no price.
+const titleWords = q => String(q || "").toLowerCase().split(/\s+/).filter(w => w.length > 1);
+const wordHits = (it, words) => words.filter(w => (it.sku + " " + it.name).toLowerCase().includes(w)).length;
+function rankMatches(items, paid, words = []) {
   const gap = it => it.price == null || paid == null ? Infinity : Math.abs(it.price - paid);
-  return [...items].sort((a, b) => gap(a) - gap(b) || newestFirst(a, b));
+  return [...items].sort((a, b) => wordHits(b, words) - wordHits(a, words) || gap(a) - gap(b) || newestFirst(a, b));
 }
 function matchesHtml() {
-  const paid = parseMoney(panel.paid);
+  const paid = parseMoney(panel.paid), words = titleWords(panel.title);
   const pool = Object.values(S.items).filter(i => i.status === "listed" || (panel.showToList && NOT_LISTED.includes(i.status)));
+  const samePrice = paid == null ? 0 : pool.filter(i => i.price === paid).length;
+  const warn = samePrice > 1 && !words.length ? `<p class="warn">${samePrice} items are listed at ${money(paid)}. Type the title from the receipt so you pick the right one.</p>` : "";
   const row = it => `<div class="row" data-act="salePick" data-id="${h(it.sku)}">${thumb(it)}<div class="grow">${titleLine(it)}<div class="sub">${h(boxName(it))} · ${h(platformNames(it) || STATUSES[it.status])}</div></div><div class="amt"><b>${it.price == null ? "No price" : money(it.price)}</b>${paid != null && it.price === paid ? "<small class='good'>Exact</small>" : ""}</div></div>`;
-  return (pool.length ? rankMatches(pool, paid).map(row).join("") : `<div class="empty">No listed items yet.</div>`) +
+  return warn + (pool.length ? rankMatches(pool, paid, words).map(row).join("") : `<div class="empty">No listed items yet.</div>`) +
     (panel.showToList ? "" : `<button type="button" class="link" data-act="saleToList">Show items not listed yet</button>`);
 }
 function salePickView() {
-  return `<h2>Record sale</h2><label class="f">Sold for<input id="salePaid" inputmode="decimal" autocomplete="off" placeholder="14.99" value="${h(panel.paid || "")}" autofocus></label><div id="matches">${matchesHtml()}</div>`;
+  return `<h2>Record sale</h2><label class="f">Sold for<input id="salePaid" inputmode="decimal" autocomplete="off" placeholder="14.99" value="${h(panel.paid || "")}" autofocus></label><label class="f">Title on receipt<input id="saleTitle" autocomplete="off" placeholder="A few words from the item title" value="${h(panel.title || "")}"></label><div id="matches">${matchesHtml()}</div>`;
 }
 function salePayView() {
   const it = S.items[panel.id], paid = panel.paid || (it.paid != null ? it.paid : "");
@@ -463,34 +469,79 @@ async function submitSale() {
   if (!day) return fieldErr("payErr", "Pick the sale date first.");
   if (day > today()) return fieldErr("payErr", "The sale date can't be in the future.");
   const id = panel.id, it = S.items[id], buyer = $("#payBuyer").value.trim() || null, tracking = $("#payTracking").value.trim() || null;
-  // Heading to Shipped goes through the Shipped popup. Closing that leaves the item in Sold & Packing.
-  const target = panel.target || "sold", status = target === "shipped" ? "sold" : target, stay = panel.stay;
+  // Heading to Shipped or Pending Dropoff goes through the bag check. Closing that leaves the item in Sold & Packing.
+  const target = panel.target || "sold", status = target === "shipped" || target === "dropoff" ? "sold" : target, stay = panel.stay;
+  const next = target === "shipped" ? { view: "ship", id } : target === "dropoff" ? { view: "pack", id } : null;
   if (bundle.length) {
     const keep = panel.keep;
     if (!await saveBundle(id, bundle, amounts, payout, { buyer, tracking, soldAt: dayToMs(day) }, status)) return;
     if (keep) { openItem(id); return toast("Bundle saved"); }
     if (!stay) { S.q = ""; $("#search").value = ""; S.tab = status; renderList(); }
-    return openPanel(target === "shipped" ? { view: "ship", id } : { view: "saleDone", id, bundleTotal: { paid: totalPaid, payout } });
+    return openPanel(next || { view: "saleDone", id, bundleTotal: { paid: totalPaid, payout } });
   }
   const payoutEstimated = !!(it && it.payoutEstimated) && payout === it.payout;
   if (await savePopup({ status, paid, payout, payoutEstimated, buyer, tracking, soldAt: dayToMs(day), shippedAt: null })) {
     if (!stay) { S.q = ""; $("#search").value = ""; S.tab = status; renderList(); }
-    openPanel(target === "shipped" ? { view: "ship", id } : { view: "saleDone", id });
+    openPanel(next || { view: "saleDone", id });
   }
 }
 function saleDoneView() {
   const it = S.items[panel.id], total = panel.bundleTotal, also = total ? bundlePartners(it) : [];
-  return `<p class="muted">Sold. Pull this one from</p><div class="bigbox">${h(boxName(it))}</div><div class="done-photo">${thumb(it, "big")}</div><div class="bigsku">${h(it.sku)}</div><p class="name">${h(it.name)}</p>
+  return `<p class="muted">Sold. Pull this one from</p><div class="bigbox">${h(boxName(it))}</div><div class="done-photo">${thumb(it, "big")}</div><div class="bigsku">${h(it.sku)}</div><p class="name">${h(it.name)}</p>${it.buyer ? `<p class="muted">Write <b>${h(it.buyer)}</b> on the bag</p>` : ""}
     ${also.length ? `<p class="muted">Also pull</p>${also.map(b => `<div class="row flat">${thumb(b)}<div class="grow">${titleLine(b)}<div class="sub">${h(boxName(b))}</div></div></div>`).join("")}` : ""}<p class="muted">Sold for ${money(total ? total.paid : it.paid)} · Total payout ${money(total ? total.payout : it.payout)}</p><div class="btns"><button class="btn primary" data-act="close" autofocus>Done</button></div>`;
+}
+
+/* Bag check: before a package is sealed, type the SKU off each bag. A bag from another order is blocked. */
+const skuMatches = (typed, sku) => {
+  const t = String(typed).trim().toUpperCase(), s = String(sku).toUpperCase(), n = s.split("-").pop();
+  return t === s || (/^\d+$/.test(t) && /^\d+$/.test(n) && Number(t) === Number(n));
+};
+const packItems = it => [it, ...bundlePartners(it).filter(b => b.status !== "shipped")];
+const unchecked = it => packItems(it).filter(b => !b.packCheckedAt);
+const buyerLine = it => `<p class="muted">To <b>${it.buyer ? h(it.buyer) : "no buyer saved"}</b></p>`;
+function bagCheckHtml(it) {
+  const need = unchecked(it);
+  if (!need.length) return "";
+  return `<div class="f">${need.length > 1 ? "SKUs on the bags" : "SKU on the bag"}${need.map((b, i) => `<input data-bag autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="Type it from the bag"${i ? "" : " autofocus"} aria-label="SKU on bag ${i + 1}">`).join("")}</div>`;
+}
+// Returns an error, or null when every bag belongs to this order.
+function checkBags(it) {
+  const left = unchecked(it), typed = $$("[data-bag]").map(i => i.value.trim());
+  if (typed.some(t => !t)) return "Type the SKU from each bag first.";
+  for (const t of typed) {
+    const k = left.findIndex(b => skuMatches(t, b.sku));
+    if (k < 0) return `Wrong bag: ${t} isn't in this order${it.buyer ? " for " + it.buyer : ""}. Don't seal it.`;
+    left.splice(k, 1);
+  }
+  return null;
+}
+
+/* Packed (Pending Dropoff) */
+function packView() {
+  const it = S.items[panel.id], also = bundlePartners(it).filter(b => b.status === "sold");
+  return `<h2>Packed for dropoff</h2><div class="row flat">${thumb(it)}<div class="grow">${titleLine(it)}<div class="sub">${h(boxName(it))}</div></div></div>${buyerLine(it)}${also.length ? `<p class="muted">Also packs ${also.map(b => h(b.sku)).join(", ")}</p>` : ""}<form data-form="pack">
+    ${bagCheckHtml(it)}
+    <p class="err" id="packErr" hidden></p>
+    <button class="btn primary wide" type="submit">Packed</button></form>`;
+}
+async function submitPack() {
+  const id = panel.id, it = S.items[id], back = panel.back, bad = checkBags(it);
+  if (bad) return fieldErr("packErr", bad);
+  const now = Date.now(), also = bundlePartners(it).filter(b => b.status === "sold");
+  if (!await savePopup({ status: "dropoff", packCheckedAt: it.packCheckedAt || now })) return;
+  await Promise.all(also.map(b => patchItem(b.sku, { status: "dropoff", packCheckedAt: b.packCheckedAt || now })));
+  if (back) openItem(id); else closePanel();
+  toast(id + (also.length ? " and its bundle are packed" : " is packed"));
 }
 
 /* Mark shipped */
 function shipView() {
   const it = S.items[panel.id];
   const also = bundlePartners(it).filter(b => b.status !== "shipped");
-  return `<h2>Mark shipped</h2><div class="row flat">${thumb(it)}<div class="grow">${titleLine(it)}<div class="sub">${h(boxName(it))}</div></div></div>${also.length ? `<p class="muted">Also ships ${also.map(b => h(b.sku)).join(", ")}</p>` : ""}<form data-form="ship">
+  return `<h2>Mark shipped</h2><div class="row flat">${thumb(it)}<div class="grow">${titleLine(it)}<div class="sub">${h(boxName(it))}</div></div></div>${buyerLine(it)}${also.length ? `<p class="muted">Also ships ${also.map(b => h(b.sku)).join(", ")}</p>` : ""}<form data-form="ship">
+    ${bagCheckHtml(it)}
     <label class="f">Ship date<input id="shipDate" type="datetime-local" value="${timeValue()}"></label>
-    <label class="f">Tracking number<input id="shipTracking" autocomplete="off" autocapitalize="off" spellcheck="false" value="${h(it.tracking || "")}" autofocus></label>
+    <label class="f">Tracking number<input id="shipTracking" autocomplete="off" autocapitalize="off" spellcheck="false" value="${h(it.tracking || "")}"${unchecked(it).length ? "" : " autofocus"}></label>
     ${slotHtml("proof")}
     <p class="err" id="shipErr" hidden></p>
     <button class="btn primary wide" type="submit">Mark shipped</button></form>`;
@@ -499,10 +550,13 @@ async function submitShip() {
   const shippedAt = parseTime($("#shipDate").value);
   if (shippedAt == null) return fieldErr("shipErr", "Pick the ship date first.");
   if (shippedAt > Date.now()) return fieldErr("shipErr", "The ship date can't be in the future.");
-  const id = panel.id, back = panel.back, tracking = $("#shipTracking").value.trim() || null, also = bundlePartners(S.items[id]).filter(b => b.status !== "shipped");
-  if (!await savePopup({ status: "shipped", shippedAt, tracking })) return;
+  const id = panel.id, it = S.items[id], back = panel.back, tracking = $("#shipTracking").value.trim() || null, also = bundlePartners(it).filter(b => b.status !== "shipped");
+  const bad = checkBags(it);
+  if (bad) return fieldErr("shipErr", bad);
+  const now = Date.now();
+  if (!await savePopup({ status: "shipped", shippedAt, tracking, packCheckedAt: it.packCheckedAt || now })) return;
   // patchItem shows its own error for any bundled item that fails.
-  await Promise.all(also.map(b => patchItem(b.sku, { status: "shipped", shippedAt, tracking: tracking || b.tracking || null })));
+  await Promise.all(also.map(b => patchItem(b.sku, { status: "shipped", shippedAt, tracking: tracking || b.tracking || null, packCheckedAt: b.packCheckedAt || now })));
   if (back) openItem(id); else closePanel();
   toast(id + (also.length ? " and its bundle are shipped" : " is shipped"));
 }
@@ -820,10 +874,11 @@ async function changeStatus(id, to) {
   if (to === it.status) return;
   if (to === "sold" || (toSold && !wasSold)) return openPanel({ view: "salePay", id, target: to, stay: true });
   if (to === "shipped") return openPanel({ view: "ship", id, back: inDrawer });
+  if (to === "dropoff" && unchecked(it).length) return openPanel({ view: "pack", id, back: inDrawer });
   if (to === "listed" && !wasSold) return openPanel({ view: "list", id, platform: it.platform || "depop", stay: true });
   const partners = bundlePartners(it);
   if (wasSold && !toSold) return askConfirm(partners.length ? `Undo this sale? ${partners.map(b => b.sku).join(", ")} stays sold with its share.` : "Undo this sale?", "Undo sale", async () => {
-    const ok = await patchItem(id, { status: to, paid: null, payout: null, payoutEstimated: false, bundleId: null, buyer: null, tracking: null, soldAt: null, shippedAt: null, ...(to === "listed" ? {} : { listedAt: null }) });
+    const ok = await patchItem(id, { status: to, paid: null, payout: null, payoutEstimated: false, bundleId: null, buyer: null, tracking: null, soldAt: null, shippedAt: null, packCheckedAt: null, ...(to === "listed" ? {} : { listedAt: null }) });
     if (ok && to === "listed") return openPanel({ view: "list", id, platform: it.platform || "depop", stay: true });
     after();
   }, after);
@@ -857,7 +912,7 @@ const actions = {
     const id = panel.id, boost = g === "itemBoost", field = boost ? "boosted" : "box";
     if (!await patchItem(id, { [field]: boost ? v === "yes" : v }) && panel && panel.id === id && S.items[id]) { const saved = boost ? (S.items[id].boosted ? "yes" : "no") : S.items[id].box; $$(`[data-group="${g}"]`).forEach(c => c.classList.toggle("on", c.dataset.v === saved)); }
   },
-  salePick: t => { panel = { view: "salePay", id: t.dataset.id, paid: panel.paid, back: { paid: panel.paid, showToList: panel.showToList } }; openPanel(panel); },
+  salePick: t => { panel = { view: "salePay", id: t.dataset.id, paid: panel.paid, back: { paid: panel.paid, title: panel.title, showToList: panel.showToList } }; openPanel(panel); },
   saleBack: () => openPanel({ view: "salePick", ...panel.back }),
   saleToList: () => { panel.showToList = true; $("#matches").innerHTML = matchesHtml(); },
   logBundle: () => openPanel({ view: "salePay", id: panel.id, keep: true, bundle: [], bundlePaid: {}, bundlePicking: true }),
@@ -930,7 +985,7 @@ document.addEventListener("keydown", e => {
 window.addEventListener("resize", closeStatusMenu);
 document.addEventListener("submit", e => {
   e.preventDefault();
-  const fn = { add: submitAdd, list: submitList, sale: submitSale, ship: submitShip }[e.target.dataset.form]; if (fn) fn();
+  const fn = { add: submitAdd, list: submitList, sale: submitSale, pack: submitPack, ship: submitShip }[e.target.dataset.form]; if (fn) fn();
 });
 document.addEventListener("input", e => {
   const id = e.target.id;
@@ -940,6 +995,8 @@ document.addEventListener("input", e => {
   if (id === "salesQ") { SH.q = e.target.value; drawSales(); }
   if (id === "search") { S.q = e.target.value; renderList(); }
   if (id === "salePaid") { panel.paid = e.target.value; $("#matches").innerHTML = matchesHtml(); }
+  if (id === "saleTitle") { panel.title = e.target.value; $("#matches").innerHTML = matchesHtml(); }
+  if (e.target.dataset.bag != null) { fieldErr("shipErr", ""); fieldErr("packErr", ""); }
   if (id === "listPrice") { fieldErr("listErr", ""); checkDuplicatePrice(); }
   if (id === "addName") { panel.name = e.target.value; fieldErr("addErr", ""); }
   if (id === "listDate") fieldErr("listErr", "");
