@@ -75,7 +75,7 @@ button.pill:hover { background: color-mix(in srgb, var(--c) 28%, transparent); }
 .status-menu { position: absolute; z-index: 9; display: flex; flex-direction: column; gap: 4px; padding: 6px; background: var(--card); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 6px 24px rgba(0, 0, 0, .18); }
 .status-menu .pill { text-align: left; }
 .status-menu .pill.on { box-shadow: inset 0 0 0 1.5px var(--c); }
-.s-photos { --c: var(--warn); } .s-ready { --c: var(--accent); } .s-listed { --c: var(--good); } .s-sold { --c: var(--purple); } .s-dropoff { --c: var(--orange); } .s-shipped { --c: var(--teal); }
+.s-prep { --c: var(--accent); } .s-listed { --c: var(--good); } .s-sold { --c: var(--purple); } .s-shipped { --c: var(--teal); } .s-ended { --c: var(--warn); }
 .flag { display: inline-block; background: var(--flag-bg); color: var(--warn); font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 7px; white-space: nowrap; }
 .empty { padding: 28px 8px; text-align: center; color: var(--muted); border-top: 1px solid var(--line); }
 
@@ -207,3 +207,11 @@ select.cell { min-width: 118px; cursor: pointer; }
   .ph { width: 48px; height: 48px; }
   .right, #panel .row .amt { grid-column: 2; justify-self: start; text-align: left; }
 }
+
+/* eBay auto-sync */
+.ebay-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: -4px 0 12px; font-size: 14px; }
+.ebay-bar > span { flex: 1 1 200px; }
+.btn.small { padding: 6px 10px; font-size: 13px; }
+.inbox-row { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; padding: 10px 0; border-top: 1px solid var(--line); }
+.inbox-row .grow { flex: 1 1 220px; min-width: 0; }
+.inbox-row .btns { margin: 0; }

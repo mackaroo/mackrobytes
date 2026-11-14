@@ -14,6 +14,13 @@
 !/icon-512.png
 !/SETUP.md
 !/schema.sql
+!/supabase/
+/supabase/*
+!/supabase/functions/
+/supabase/functions/*
+!/supabase/functions/ebay-sync/
+/supabase/functions/ebay-sync/*
+!/supabase/functions/ebay-sync/index.ts
 !/.github/
 /.github/*
 !/.github/workflows/

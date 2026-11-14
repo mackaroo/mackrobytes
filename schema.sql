@@ -40,3 +40,30 @@ create policy "signed-in users upload photos" on storage.objects
 drop policy if exists "signed-in users delete photos" on storage.objects;
 create policy "signed-in users delete photos" on storage.objects
   for delete to authenticated using (bucket_id = 'photos');
+
+-- ===== eBay auto-sync (optional; see SETUP.md → "eBay auto-sync") =====
+-- Run this part once, after the ebay-sync Edge Function exists.
+
+-- Private storage for the eBay sign-in token and sync bookkeeping.
+-- Row security is on with no policies, so only the Edge Function (service role) can read it, never the app.
+create table if not exists public.private_kv (
+  key         text primary key,
+  value       jsonb,
+  updated_at  timestamptz not null default now()
+);
+alter table public.private_kv enable row level security;
+revoke all on public.private_kv from anon, authenticated;
+
+-- Runs the sync every 15 minutes. Before running this, store the same SYNC_SECRET you gave the function:
+--   select vault.create_secret('PASTE-YOUR-SYNC-SECRET', 'ebay_sync_secret');
+create extension if not exists pg_cron;
+create extension if not exists pg_net;
+select cron.unschedule('ebay-sync') where exists (select 1 from cron.job where jobname = 'ebay-sync');
+select cron.schedule('ebay-sync', '*/15 * * * *', $$
+  select net.http_post(
+    url := 'https://vjxoovvddupxzxmxrspl.supabase.co/functions/v1/ebay-sync',
+    headers := jsonb_build_object('Content-Type', 'application/json',
+      'x-sync-secret', (select decrypted_secret from vault.decrypted_secrets where name = 'ebay_sync_secret')),
+    body := '{}'::jsonb,
+    timeout_milliseconds := 60000);
+$$);

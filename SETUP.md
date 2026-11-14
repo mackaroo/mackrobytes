@@ -28,6 +28,26 @@ The anon key is safe to publish. The database refuses anyone who isn't signed in
 
 You sign in once per device. After that, everything stays in sync.
 
+## 4. eBay auto-sync (optional)
+Every 15 minutes eBay moves items forward through the 5 statuses (Prep → Listed → Sold → Shipped, or Listed → Ended). Each item moves once per eBay listing or order, so a status you change by hand stays as you set it.
+- **Listed:** a live eBay listing with the SKU moves a Prep or Ended item to Listed, with its price and start date.
+- **Sold:** a paid order fills in Sold for, payout, buyer and sale date.
+- **Shipped:** once eBay has the label or tracking, the item moves to Shipped with its tracking number. eBay counts a bought label as shipped. Until you tick it, the row says "Bag not checked": open the item and press **Check bag**.
+- **Ended:** a listing that ends unsold moves the item to Ended. If the item is also on Depop or Facebook, only eBay is removed and the item stays Listed.
+- **Put the SKU on every eBay listing**, in eBay's *Custom label (SKU)* field. Sales without a known SKU show as "eBay sales to match" on Home.
+- Cancelled or refunded orders are flagged on Home and never undone automatically.
+- If the item was also on Depop or Facebook, its row says "Delist on …" until you press **Delisted** on the item page.
+
+One-time setup (Function URL = `https://vjxoovvddupxzxmxrspl.supabase.co/functions/v1/ebay-sync`):
+1. **eBay developer account** at developer.ebay.com → create a **Production** keyset. Note the App ID and Cert ID.
+2. **Edge Function:** Supabase → Edge Functions → Deploy a new function → name `ebay-sync`. Paste `supabase/functions/ebay-sync/index.ts`, turn **Verify JWT off**, and deploy.
+3. **Function secrets** (Edge Functions → Secrets): `EBAY_CLIENT_ID`, `EBAY_CLIENT_SECRET`, `SYNC_SECRET` (any long random text), `EBAY_VERIFY_TOKEN` (32–80 letters/digits), `EBAY_DELETION_ENDPOINT` (the Function URL), and `EBAY_RUNAME` (step 5).
+4. **Account deletion notices** (eBay keyset → Alerts & Notifications): pick the endpoint option, enter the Function URL and the same verify token, then press Save. eBay checks it on the spot.
+5. **Sign-in redirect** (eBay → User Tokens → Get a Token from eBay via Your Application → add eBay Redirect URL): set the *auth accepted URL* to the Function URL. Copy the **RuName** into `EBAY_RUNAME`.
+6. **Database:** run the "eBay auto-sync" part at the bottom of `schema.sql` in the SQL Editor, after the `vault.create_secret` line with your SYNC_SECRET.
+7. **Connect:** open `<Function URL>?connect=<SYNC_SECRET>` and sign in to eBay. It says "eBay is connected" when done. Do it again if it ever expires (about every 18 months).
+8. **Check:** on Home press **Sync eBay**. A dry run (`?dry=1`) lists what would change without saving anything.
+
 ## Getting around
 - **Add item:** drag in photos, enter a name, pick a box, and get the SKU to write on the bag.
 - **Mark listed:** enter the price and where it's listed.

@@ -20,11 +20,13 @@ const YES_NO = { yes: "Yes", no: "No" };
 // platform stays as the first one checked, for items saved before platforms existed.
 const platformsOf = it => it.platforms && it.platforms.length ? it.platforms : it.platform ? [it.platform] : [];
 const platformNames = it => platformsOf(it).map(p => PLATFORMS[p]).filter(Boolean).join(", ");
-const STATUSES = { unlisted: "Unlisted", photos: "Needs photos", ready: "To be listed", listed: "Listed", sold: "Sold & Packing", dropoff: "Pending Dropoff", shipped: "Shipped" };
-const SOLD_STATUSES = ["sold", "dropoff", "shipped"], NOT_LISTED = ["unlisted", "photos", "ready"];
-// Items saved before these statuses existed say "tolist". Sorted by photos when loaded; the saved copy changes on their next status change.
+// Five statuses, matching what eBay can see. The sync moves items forward only; your edits win.
+const STATUSES = { prep: "Prep", listed: "Listed", sold: "Sold", shipped: "Shipped", ended: "Ended" };
+const SOLD_STATUSES = ["sold", "shipped"], NOT_LISTED = ["prep", "ended"];
+// Items saved under the old statuses are shown under the new ones. The saved copy changes on their next status change.
+const OLD_STATUS = { tolist: "prep", unlisted: "prep", photos: "prep", ready: "prep", dropoff: "shipped" };
 function sortOldToList(items) {
-  Object.values(items).forEach(it => { if (it.status === "tolist") it.status = (it.photos || []).length || it.driveUrl ? "ready" : "photos"; });
+  Object.values(items).forEach(it => { if (OLD_STATUS[it.status]) it.status = OLD_STATUS[it.status]; });
   return items;
 }
 // <input type="date"> values are local calendar days. soldAt is stored in ms at local noon so the day can't shift across time zones.
@@ -49,7 +51,7 @@ function toast(msg, { err = false } = {}) {
 const saveErrMsg = e => e && /JWT|auth/i.test(e.message || "") ? "You've been signed out. Reload and sign in again." : "Couldn't save. Check your connection and try again.";
 
 /* ---------- data ---------- */
-const S = { items: {}, meta: {}, tab: "all", q: "", view: "inv", loaded: false, metaLoaded: false };
+const S = { items: {}, meta: {}, ebay: null, tab: "all", q: "", view: "inv", loaded: false, metaLoaded: false };
 // SKUs and backups need both, or a new item could reuse a SKU and a backup could come out empty.
 const shopReady = () => S.loaded && S.metaLoaded;
 const needsShop = fn => t => shopReady() ? fn(t) : toast("Your shop hasn't loaded yet. Try again in a moment, or reload.", { err: true });
@@ -110,7 +112,7 @@ async function addNewItem(fields) {
   for (let tries = 0; tries < 5; tries++) {
     const { yy, head, n } = nextSkuNumber(), num = n + bump, sku = head + String(num).padStart(4, "0");
     const now = Date.now();
-    const item = { sku, photos: [], driveUrl: "", status: "photos", price: null, platform: null, platforms: [], boosted: false, tracking: null, receiptImg: null, labelImg: null, proofImg: null, paid: null, payout: null, payoutEstimated: false, buyer: null, createdAt: now, updatedAt: now, listedAt: null, soldAt: null, shippedAt: null, packCheckedAt: null, ...fields };
+    const item = { sku, photos: [], driveUrl: "", status: "prep", price: null, platform: null, platforms: [], boosted: false, tracking: null, receiptImg: null, labelImg: null, proofImg: null, paid: null, payout: null, payoutEstimated: false, buyer: null, createdAt: now, updatedAt: now, listedAt: null, soldAt: null, shippedAt: null, packCheckedAt: null, ...fields };
     try { await createItem(sku, item); saveMeta({ skuYear: yy, skuNext: num + 1 }); renderList(); return sku; }
     catch (e) { if (e && e.code === "23505") { bump++; continue; } throw e; }
   }
@@ -157,11 +159,9 @@ async function addPhotos(id, files) {
   }
   if (added.length) {
     const cur = S.items[id];
-    const nowReady = cur && cur.status === "photos";
-    const ok = cur && await patchItem(id, { photos: [...(cur.photos || []), ...added], ...(nowReady ? { status: "ready" } : {}) });
+    const ok = cur && await patchItem(id, { photos: [...(cur.photos || []), ...added] });
     if (!ok) { await deleteStoredPhotos(added.map(p => p.id)); return; }
     renderPhotoStrip(id);
-    if (nowReady) $$('[data-act="setStatus"]').forEach(c => c.classList.toggle("on", c.dataset.v === "ready"));
   }
   if (unreadable.length || notUploaded.length) toast([unreadable.length && photoErrMsg(unreadable), notUploaded.length && uploadErrMsg(notUploaded)].filter(Boolean).join(" "), { err: true });
   else toast(added.length === 1 ? "Photo saved" : added.length + " photos saved");
@@ -239,7 +239,11 @@ function statusPill(it) {
 function rowSub(it) {
   const parts = [h(boxName(it))];
   if (isSold(it)) parts.push(it.buyer ? "To " + h(it.buyer) : it.status === "shipped" ? "No buyer" : flag("Needs buyer"));
+  if (it.status === "prep" && !(it.photos || []).length && !it.driveUrl) parts.push(flag("Needs photos"));
+  if (it.status === "ended") parts.push(flag("Ended unsold"));
+  if (it.autoShipped && !it.packCheckedAt && isSold(it)) parts.push(flag("Bag not checked"));
   if (it.status === "listed") parts.push(it.price == null ? flag("Needs price") : `${money(it.price)} · ${h(platformNames(it) || "No platform")}`);
+  if ((it.delistOn || []).length) parts.push(flag("Delist on " + it.delistOn.map(p => PLATFORMS[p] || p).join(", ")));
   if (isSold(it)) parts.push(it.payout == null ? flag("Needs payout") : `${it.paid == null ? flag("Needs sold price") : "Sold for " + money(it.paid)} · ${it.payoutEstimated ? "Estimated payout" : "Payout"} ${money(it.payout)}${bundlePartners(it).length ? " · Bundle" : ""}`);
   return parts.join(" · ");
 }
@@ -250,10 +254,51 @@ function renderSummary() {
   $("#payouts").textContent = money(out); $("#paidTotal").textContent = money(paid);
   $("#estNote").textContent = est ? "Includes " + est + " estimated" : "";
 }
+/* eBay auto-sync: status line, Sync button and the sales it couldn't match (written by the ebay-sync function) */
+const ago = ms => { const m = Math.round((Date.now() - ms) / 60000); return m < 1 ? "just now" : m < 60 ? m + " min ago" : m < 1440 ? Math.round(m / 60) + " h ago" : Math.round(m / 1440) + " d ago"; };
+const ebayInbox = () => (S.ebay && S.ebay.inbox) || [];
+function renderEbayBar() {
+  const bar = $("#ebayBar"), e = S.ebay;
+  bar.hidden = !e; if (bar.hidden) return;
+  const n = ebayInbox().length;
+  // Older than an hour means the 15-minute job has stopped, so it shows as a problem too.
+  const stale = e.lastOkAt && Date.now() - e.lastOkAt > 3600000;
+  const status = e.lastError ? `<span class="err">eBay sync failed: ${h(e.lastError)}</span>` : e.lastOkAt ? `<span class="${stale ? "err" : "muted"}">eBay synced ${h(ago(e.lastOkAt))}</span>` : `<span class="muted">eBay not synced yet</span>`;
+  bar.innerHTML = `${status}${n ? `<button type="button" class="btn small primary" data-act="ebayInbox">${n} eBay ${n === 1 ? "sale" : "sales"} to check</button>` : ""}<button type="button" class="btn small" data-act="ebaySync"${S.ebaySyncing ? " disabled" : ""}>${S.ebaySyncing ? "Syncing…" : "Sync eBay"}</button>`;
+}
+async function ebaySyncNow() {
+  S.ebaySyncing = true; renderEbayBar();
+  try {
+    const session = await AUTH.session(); if (!session) throw new Error("You've been signed out. Reload and sign in again.");
+    const r = await fetch(CONFIG.SUPABASE_URL + "/functions/v1/ebay-sync", { method: "POST", headers: { Authorization: "Bearer " + session.access_token, apikey: CONFIG.SUPABASE_ANON_KEY } });
+    const body = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(body.error || "The eBay sync answered " + r.status + ".");
+    const n = re => (body.changes || []).filter(c => re.test(c)).length;
+    const said = [[/marked sold/, "sold"], [/marked shipped/, "shipped"], [/marked listed/, "listed"], [/marked ended/, "ended"]].map(([re, w]) => n(re) ? n(re) + " " + w : "").filter(Boolean);
+    if (body.error) throw new Error(body.error);
+    toast(said.length ? "eBay: " + said.join(", ") : "eBay: nothing new");
+  } catch (e) { console.error("eBay sync failed", e); toast("eBay sync failed: " + (e.message || e), { err: true }); }
+  finally { S.ebaySyncing = false; renderEbayBar(); }
+}
+async function dropInboxEntry(id) {
+  const keep = list => list.filter(x => x.id !== id);
+  S.ebay = { ...S.ebay, inbox: keep(ebayInbox()) }; renderEbayBar();
+  if (!DB) return true; // preview: nothing to save
+  try { await enqueue("shopmeta/ebay", async () => { const cur = await STORE.get("shopmeta", "ebay"); if (cur) await STORE.put("shopmeta", "ebay", { ...cur, inbox: keep(cur.inbox || []) }); }); return true; }
+  catch (e) { console.error("Inbox save failed", e); toast(saveErrMsg(e), { err: true }); return false; }
+}
+function ebayInboxView() {
+  const list = ebayInbox(), day = ms => ms ? new Date(ms).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : "";
+  const row = x => x.kind === "cancel"
+    ? `<div class="inbox-row"><div class="grow"><div class="title"><span class="sku">${h(x.sku)}</span><span class="name">${h(x.title)}</span></div><div class="sub">${flag("Cancelled or refunded on eBay")}</div></div><div class="btns"><button type="button" class="btn small" data-act="openItem" data-id="${h(x.sku)}">Open</button><button type="button" class="btn small" data-act="ebayDismiss" data-v="${h(x.id)}">Done</button></div></div>`
+    : `<div class="inbox-row"><div class="grow"><div class="title">${x.sku ? `<span class="sku">${h(x.sku)}</span>` : ""}<span class="name">${h(x.title)}</span></div><div class="sub">${money(x.paid)}${x.buyer ? " · " + h(x.buyer) : ""} · ${h(day(x.soldAt))}${x.sku ? " · SKU not in MackroBytes" : " · No SKU on the listing"}</div></div><div class="btns"><button type="button" class="btn small primary" data-act="ebayMatch" data-v="${h(x.id)}">Match</button><button type="button" class="btn small" data-act="ebayDismiss" data-v="${h(x.id)}">Dismiss</button></div></div>`;
+  return `<h2>eBay sales to check</h2>${list.length ? list.map(row).join("") : `<div class="empty">All caught up.</div>`}`;
+}
+
 function renderList() {
   if (!S.loaded) return;
   if (S.view === "sales") scheduleSales();
-  renderSummary();
+  renderSummary(); renderEbayBar();
   const all = Object.values(S.items);
   const tabBtn = (k, label, n) => `<button class="tab${S.tab === k && !S.q ? " on" : ""}" data-act="tab" data-v="${k}">${label} <span>${n}</span></button>`;
   $("#tabs").innerHTML = tabBtn("all", "All", all.length) + Object.keys(STATUSES).map(k => tabBtn(k, STATUSES[k], all.filter(i => i.status === k).length)).join("");
@@ -284,7 +329,7 @@ let panel = null;
 function openPanel(p) { panel = p; drawPanel(); $("#scrim").hidden = false; const f = $("#panel [autofocus]"); if (f) f.focus(); }
 function closePanel() { panel = null; $("#scrim").hidden = true; $("#panel").innerHTML = ""; }
 function drawPanel() {
-  const views = { add: addView, created: createdView, list: listView, salePick: salePickView, salePay: salePayView, saleDone: saleDoneView, pack: packView, ship: shipView, record: recordView, item: itemView, confirm: confirmView, settings: settingsView };
+  const views = { add: addView, created: createdView, list: listView, salePick: salePickView, salePay: salePayView, saleDone: saleDoneView, pack: packView, ship: shipView, record: recordView, item: itemView, confirm: confirmView, settings: settingsView, ebayInbox: ebayInboxView };
   $("#panel").classList.toggle("pop", ["list", "salePay", "pack", "ship"].includes(panel.view));
   $("#panel").innerHTML = `<button class="x" data-act="close" aria-label="Close">×</button>` + (panel.id && !S.items[panel.id] ? `<p class="err">That item no longer exists.</p>` : views[panel.view]());
 }
@@ -322,10 +367,9 @@ async function submitAdd() {
   const btn = $("#addGo"); btn.disabled = true; const files = panel.files || [];
   try {
     const sku = await addNewItem({ name, box: panel.box });
-    S.q = ""; $("#search").value = ""; S.tab = "photos"; renderList();
+    S.q = ""; $("#search").value = ""; S.tab = "prep"; renderList();
     openPanel({ view: "created", id: sku });
-    // Follows the item to its next tab only once its photos have really saved.
-    addPhotos(sku, files).then(() => { const it = S.items[sku]; if (S.tab === "photos" && it && it.status === "ready") { S.tab = "ready"; renderList(); } });
+    addPhotos(sku, files);
   } catch (e) { console.error("Add failed", e); btn.disabled = false; fieldErr("addErr", saveErrMsg(e)); }
 }
 function createdView() {
@@ -388,14 +432,15 @@ function salePickView() {
   return `<h2>Record sale</h2><label class="f">Sold for<input id="salePaid" inputmode="decimal" autocomplete="off" placeholder="14.99" value="${h(panel.paid || "")}" autofocus></label><label class="f">Title on receipt<input id="saleTitle" autocomplete="off" placeholder="A few words from the item title" value="${h(panel.title || "")}"></label><div id="matches">${matchesHtml()}</div>`;
 }
 function salePayView() {
-  const it = S.items[panel.id], paid = panel.paid || (it.paid != null ? it.paid : "");
+  const it = S.items[panel.id], paid = panel.paid || (it.paid != null ? it.paid : ""), eb = panel.ebay || {};
+  const payout = it.payout != null ? it.payout : eb.payout != null ? eb.payout : "", buyer = it.buyer || eb.buyer || "", soldOn = soldDay(it.soldAt) || soldDay(eb.soldAt) || today();
   return `<h2>${panel.keep ? "Log as bundle" : "Mark sold"}</h2><div class="row flat">${thumb(it)}<div class="grow">${titleLine(it)}<div class="sub">${h(boxName(it))}</div></div></div><form data-form="sale">
     <label class="f">Sold for<input id="payPaid" inputmode="decimal" autocomplete="off" value="${h(paid)}" ${paid !== "" ? "" : "autofocus"}></label>
     <div id="bundleBox">${bundleHtml()}</div>
-    <label class="f">Total payout<input id="payOut" inputmode="decimal" autocomplete="off" placeholder="12.70" value="${it.payout != null ? h(it.payout) : ""}" ${paid !== "" ? "autofocus" : ""}></label>
+    <label class="f">Total payout<input id="payOut" inputmode="decimal" autocomplete="off" placeholder="12.70" value="${h(payout)}" ${paid !== "" ? "autofocus" : ""}></label>
     <p class="muted" id="bundleSplit" hidden></p>
-    <label class="f">Buyer username<input id="payBuyer" autocomplete="off" autocapitalize="off" spellcheck="false" value="${h(it.buyer || "")}"></label>
-    <label class="f">Sale date<input id="payDate" type="date" max="${today()}" value="${h(soldDay(it.soldAt) || today())}"></label>
+    <label class="f">Buyer username<input id="payBuyer" autocomplete="off" autocapitalize="off" spellcheck="false" value="${h(buyer)}"></label>
+    <label class="f">Sale date<input id="payDate" type="date" max="${today()}" value="${h(soldOn)}"></label>
     ${slotHtml("receipt")}
     <label class="f">Tracking number<input id="payTracking" autocomplete="off" autocapitalize="off" spellcheck="false" value="${h(it.tracking || "")}"></label>
     ${slotHtml("label")}
@@ -468,19 +513,23 @@ async function submitSale() {
   const day = $("#payDate").value;
   if (!day) return fieldErr("payErr", "Pick the sale date first.");
   if (day > today()) return fieldErr("payErr", "The sale date can't be in the future.");
-  const id = panel.id, it = S.items[id], buyer = $("#payBuyer").value.trim() || null, tracking = $("#payTracking").value.trim() || null;
-  // Heading to Shipped or Pending Dropoff goes through the bag check. Closing that leaves the item in Sold & Packing.
-  const target = panel.target || "sold", status = target === "shipped" || target === "dropoff" ? "sold" : target, stay = panel.stay;
-  const next = target === "shipped" ? { view: "ship", id } : target === "dropoff" ? { view: "pack", id } : null;
+  const id = panel.id, it = S.items[id], buyer = $("#payBuyer").value.trim() || null, tracking = $("#payTracking").value.trim() || null, eb = panel.ebay;
+  // A sale matched from the eBay inbox: eBay becomes the platform, and the entry leaves the inbox once saved.
+  const ebayFields = eb ? { platform: "ebay", platforms: ["ebay", ...platformsOf(it).filter(p => p !== "ebay")], ebayOrderId: eb.orderId, delistOn: platformsOf(it).filter(p => p !== "ebay") } : {};
+  // Heading to Shipped goes through the bag check. Closing that leaves the item in Sold.
+  const target = panel.target || "sold", status = target === "shipped" ? "sold" : target, stay = panel.stay;
+  const next = target === "shipped" ? { view: "ship", id } : null;
   if (bundle.length) {
     const keep = panel.keep;
     if (!await saveBundle(id, bundle, amounts, payout, { buyer, tracking, soldAt: dayToMs(day) }, status)) return;
+    if (eb) { await patchItem(id, ebayFields); dropInboxEntry(eb.id); }
     if (keep) { openItem(id); return toast("Bundle saved"); }
     if (!stay) { S.q = ""; $("#search").value = ""; S.tab = status; renderList(); }
     return openPanel(next || { view: "saleDone", id, bundleTotal: { paid: totalPaid, payout } });
   }
-  const payoutEstimated = !!(it && it.payoutEstimated) && payout === it.payout;
-  if (await savePopup({ status, paid, payout, payoutEstimated, buyer, tracking, soldAt: dayToMs(day), shippedAt: null })) {
+  const payoutEstimated = eb ? !!eb.payoutEstimated && payout === eb.payout : !!(it && it.payoutEstimated) && payout === it.payout;
+  if (await savePopup({ status, paid, payout, payoutEstimated, buyer, tracking, soldAt: dayToMs(day), shippedAt: null, ...ebayFields })) {
+    if (eb) dropInboxEntry(eb.id);
     if (!stay) { S.q = ""; $("#search").value = ""; S.tab = status; renderList(); }
     openPanel(next || { view: "saleDone", id });
   }
@@ -496,7 +545,7 @@ const skuMatches = (typed, sku) => {
   const t = String(typed).trim().toUpperCase(), s = String(sku).toUpperCase(), n = s.split("-").pop();
   return t === s || (/^\d+$/.test(t) && /^\d+$/.test(n) && Number(t) === Number(n));
 };
-const packItems = it => [it, ...bundlePartners(it).filter(b => b.status !== "shipped")];
+const packItems = it => [it, ...bundlePartners(it).filter(b => b.status !== "shipped" || b.autoShipped)];
 const unchecked = it => packItems(it).filter(b => !b.packCheckedAt);
 const buyerLine = it => `<p class="muted">To <b>${it.buyer ? h(it.buyer) : "no buyer saved"}</b></p>`;
 function bagCheckHtml(it) {
@@ -516,22 +565,22 @@ function checkBags(it) {
   return null;
 }
 
-/* Packed (Pending Dropoff) */
+/* Bag check on its own (for items eBay already moved to Shipped, or before you buy the label). Status stays as it is. */
 function packView() {
-  const it = S.items[panel.id], also = bundlePartners(it).filter(b => b.status === "sold");
-  return `<h2>Packed for dropoff</h2><div class="row flat">${thumb(it)}<div class="grow">${titleLine(it)}<div class="sub">${h(boxName(it))}</div></div></div>${buyerLine(it)}${also.length ? `<p class="muted">Also packs ${also.map(b => h(b.sku)).join(", ")}</p>` : ""}<form data-form="pack">
+  const it = S.items[panel.id], also = unchecked(it).filter(b => b.sku !== it.sku);
+  return `<h2>Bag check</h2><div class="row flat">${thumb(it)}<div class="grow">${titleLine(it)}<div class="sub">${h(boxName(it))}</div></div></div>${buyerLine(it)}${also.length ? `<p class="muted">Also checks ${also.map(b => h(b.sku)).join(", ")}</p>` : ""}<form data-form="pack">
     ${bagCheckHtml(it)}
     <p class="err" id="packErr" hidden></p>
-    <button class="btn primary wide" type="submit">Packed</button></form>`;
+    <button class="btn primary wide" type="submit">Bag checked</button></form>`;
 }
 async function submitPack() {
   const id = panel.id, it = S.items[id], back = panel.back, bad = checkBags(it);
   if (bad) return fieldErr("packErr", bad);
-  const now = Date.now(), also = bundlePartners(it).filter(b => b.status === "sold");
-  if (!await savePopup({ status: "dropoff", packCheckedAt: it.packCheckedAt || now })) return;
-  await Promise.all(also.map(b => patchItem(b.sku, { status: "dropoff", packCheckedAt: b.packCheckedAt || now })));
+  const now = Date.now(), also = unchecked(it).filter(b => b.sku !== id);
+  if (!it.packCheckedAt && !await savePopup({ packCheckedAt: now })) return;
+  await Promise.all(also.map(b => patchItem(b.sku, { packCheckedAt: now })));
   if (back) openItem(id); else closePanel();
-  toast(id + (also.length ? " and its bundle are packed" : " is packed"));
+  toast(id + (also.length ? " and its bundle are checked" : " is checked"));
 }
 
 /* Mark shipped */
@@ -566,6 +615,8 @@ function itemView() {
   const it = S.items[panel.id], id = h(it.sku), sold = isSold(it), partners = bundlePartners(it);
   return `<div class="sku">${id}</div>
     <div class="f status">Status<div class="chips">${Object.keys(STATUSES).map(k => `<button type="button" class="chip${it.status === k ? " on" : ""}" data-act="setStatus" data-v="${k}">${h(STATUSES[k])}</button>`).join("")}</div></div>
+    ${(it.delistOn || []).length ? `<p class="warn">Sold on eBay. Delist it on ${h(it.delistOn.map(p => PLATFORMS[p] || p).join(", "))}. <button type="button" class="link" data-act="delisted">Delisted</button></p>` : ""}
+    ${sold && (it.status === "sold" || it.autoShipped) && unchecked(it).length ? `<p class="warn">Bag not checked yet. <button type="button" class="link" data-act="checkBag">Check bag</button></p>` : ""}
     <div id="photoStrip">${photoStripHtml(it)}</div>
     <button type="button" class="drop small" id="drop" data-act="pickFiles">Drag photos here<small>or click to choose</small></button>
     ${it.driveUrl ? `<a class="link" href="${h(it.driveUrl)}" target="_blank" rel="noopener">Open photos in Google Drive</a>` : ""}
@@ -874,20 +925,17 @@ async function changeStatus(id, to) {
   if (to === it.status) return;
   if (to === "sold" || (toSold && !wasSold)) return openPanel({ view: "salePay", id, target: to, stay: true });
   if (to === "shipped") return openPanel({ view: "ship", id, back: inDrawer });
-  if (to === "dropoff" && unchecked(it).length) return openPanel({ view: "pack", id, back: inDrawer });
   if (to === "listed" && !wasSold) return openPanel({ view: "list", id, platform: it.platform || "depop", stay: true });
   const partners = bundlePartners(it);
   if (wasSold && !toSold) return askConfirm(partners.length ? `Undo this sale? ${partners.map(b => b.sku).join(", ")} stays sold with its share.` : "Undo this sale?", "Undo sale", async () => {
-    const ok = await patchItem(id, { status: to, paid: null, payout: null, payoutEstimated: false, bundleId: null, buyer: null, tracking: null, soldAt: null, shippedAt: null, packCheckedAt: null, ...(to === "listed" ? {} : { listedAt: null }) });
+    const ok = await patchItem(id, { status: to, paid: null, payout: null, payoutEstimated: false, bundleId: null, buyer: null, tracking: null, soldAt: null, shippedAt: null, packCheckedAt: null, autoShipped: false, ...(to === "listed" ? {} : { listedAt: null }) });
     if (ok && to === "listed") return openPanel({ view: "list", id, platform: it.platform || "depop", stay: true });
     after();
   }, after);
   const patch = { status: to };
   if (toSold) patch.shippedAt = null;
-  else if (it.status === "listed") patch.listedAt = null;
+  else if (to === "prep") patch.listedAt = null; // Ended keeps its listed date
   const ok = await patchItem(id, patch);
-  // A bundle leaves together: one item going to dropoff takes the others that are still packing.
-  if (ok && to === "dropoff") await Promise.all(partners.filter(b => b.status === "sold").map(b => patchItem(b.sku, { status: "dropoff" })));
   if (ok && inDrawer) openItem(id);
 }
 const openItem = id => openPanel({ view: "item", id });
@@ -912,7 +960,13 @@ const actions = {
     const id = panel.id, boost = g === "itemBoost", field = boost ? "boosted" : "box";
     if (!await patchItem(id, { [field]: boost ? v === "yes" : v }) && panel && panel.id === id && S.items[id]) { const saved = boost ? (S.items[id].boosted ? "yes" : "no") : S.items[id].box; $$(`[data-group="${g}"]`).forEach(c => c.classList.toggle("on", c.dataset.v === saved)); }
   },
-  salePick: t => { panel = { view: "salePay", id: t.dataset.id, paid: panel.paid, back: { paid: panel.paid, title: panel.title, showToList: panel.showToList } }; openPanel(panel); },
+  salePick: t => { panel = { view: "salePay", id: t.dataset.id, paid: panel.paid, ebay: panel.ebay, back: { paid: panel.paid, title: panel.title, showToList: panel.showToList, ebay: panel.ebay } }; openPanel(panel); },
+  ebayInbox: () => openPanel({ view: "ebayInbox" }),
+  ebaySync: ebaySyncNow,
+  ebayDismiss: async t => { if (await dropInboxEntry(t.dataset.v) && panel && panel.view === "ebayInbox") drawPanel(); },
+  ebayMatch: t => { const x = ebayInbox().find(e => e.id === t.dataset.v); if (x) openPanel({ view: "salePick", paid: String(x.paid), title: x.title, ebay: x }); },
+  checkBag: () => openPanel({ view: "pack", id: panel.id, back: true }),
+  delisted: async () => { if (await patchItem(panel.id, { delistOn: [] })) openItem(panel.id); },
   saleBack: () => openPanel({ view: "salePick", ...panel.back }),
   saleToList: () => { panel.showToList = true; $("#matches").innerHTML = matchesHtml(); },
   logBundle: () => openPanel({ view: "salePay", id: panel.id, keep: true, bundle: [], bundlePaid: {}, bundlePicking: true }),
@@ -1051,7 +1105,7 @@ async function startSync() {
   catch (e) { console.error("Couldn't set up data", e); return showFatal("Couldn't load your shop. Nothing was lost. Check your connection, then reload."); }
   const fail = () => { $("#syncErr").hidden = false; };
   STORE.watch("shop", m => { $("#syncErr").hidden = true; S.items = sortOldToList(m); S.loaded = true; renderList(); }, fail);
-  STORE.watch("shopmeta", m => { S.meta = m.profile || {}; S.metaLoaded = true; }, fail);
+  STORE.watch("shopmeta", m => { S.meta = m.profile || {}; S.ebay = m.ebay || null; S.metaLoaded = true; renderEbayBar(); if (panel && panel.view === "ebayInbox") drawPanel(); }, fail);
 }
 function startLocal() {
   $("#previewNote").hidden = false;
