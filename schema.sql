@@ -67,3 +67,18 @@ select cron.schedule('ebay-sync', '*/15 * * * *', $$
     body := '{}'::jsonb,
     timeout_milliseconds := 60000);
 $$);
+
+-- Depop auto-sync: reads Depop sale emails (Gmail, read-only) every 15 minutes.
+-- The job proves itself with a random token made here in the database (nobody copies a secret).
+create extension if not exists pgcrypto;
+insert into public.private_kv (key, value) values ('cron_token', jsonb_build_object('token', encode(extensions.gen_random_bytes(32), 'hex')))
+  on conflict (key) do nothing;
+select cron.unschedule('depop-sync') where exists (select 1 from cron.job where jobname = 'depop-sync');
+select cron.schedule('depop-sync', '*/15 * * * *', $$
+  select net.http_post(
+    url := 'https://vjxoovvddupxzxmxrspl.supabase.co/functions/v1/depop-sync',
+    headers := jsonb_build_object('Content-Type', 'application/json',
+      'x-cron-token', (select value->>'token' from public.private_kv where key = 'cron_token')),
+    body := '{}'::jsonb,
+    timeout_milliseconds := 60000);
+$$);

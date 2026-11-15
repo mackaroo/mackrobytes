@@ -48,6 +48,25 @@ One-time setup (Function URL = `https://vjxoovvddupxzxmxrspl.supabase.co/functio
 7. **Connect:** open `<Function URL>?connect=<SYNC_SECRET>` and sign in to eBay. It says "eBay is connected" when done. Do it again if it ever expires (about every 18 months).
 8. **Check:** on Home press **Sync eBay**. A dry run (`?dry=1`) lists what would change without saving anything.
 
+## 5. Depop auto-sync (optional)
+Depop has no seller API, so MackroBytes reads two things you already have. **Nothing is ever changed on Depop.**
+- **Gmail, every 15 minutes (read-only access):** a "sale confirmation" email moves the matching Listed Depop item to Sold, with Sold for, payout, buyer and sale date. Emails carry no SKU, so it matches on the Depop title and price. It only acts when exactly one item fits, and the rest go to "Depop sales to check" on Home.
+- **Selling Hub, 9am and 6pm (read-only browser check):** a scheduled Claude task opens your Sold and Active Selling Hub pages in Chrome and only reads them. Using each listing's SKU it moves items to Sold, Shipped (when Depop says shipped), Listed (Prep/Ended to Listed) and Ended (gone from Depop without a sale, and only when the whole Active list was read).
+  - It only opens those two pages. It never clicks, types or runs scripts, and it stops at any sign-in or captcha.
+  - It runs only while the Mac is awake with Chrome and the Claude app open. A missed run is caught up on the next one.
+  - The task is "MackroBytes: Depop Selling Hub read" under **Scheduled** in the Claude app. Its last read is in `mackrobytes/.claude/depop-last-read.json`.
+- **Put the SKU on every Depop listing** (the SKU field). Sales without one show under "Depop sales to check".
+- Each item moves once per sale, and a status you change by hand stays as you set it. Cancelled Depop orders are flagged, never undone.
+
+One-time setup (Function URL = `https://vjxoovvddupxzxmxrspl.supabase.co/functions/v1/depop-sync`):
+1. **Edge Function:** Supabase → Edge Functions → Deploy a new function → name `depop-sync`. Paste `supabase/functions/depop-sync/index.ts`, turn **Verify JWT off**, and deploy. It uses the same `SYNC_SECRET` as eBay.
+   - The Selling Hub check works from here on. Steps 2–5 are for Gmail only.
+2. **Google Cloud** (console.cloud.google.com): create a project → enable the **Gmail API** → OAuth consent screen: External, add your Gmail as a test user, add the scope `gmail.readonly` → then **Publish app** (otherwise Google expires the sign-in every 7 days; Google will warn "unverified app", which is expected for your own app).
+3. **Credentials** → Create OAuth client ID → *Web application* → Authorized redirect URI = the Function URL. Add its Client ID and Client secret as function secrets `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`.
+4. **Connect:** open `<Function URL>?connect=<SYNC_SECRET>`, sign in with the Gmail that gets Depop emails, and allow read-only access. It says "Gmail (read-only) is connected".
+5. **Database:** run `create extension if not exists pg_cron; create extension if not exists pg_net;` and then the "Depop auto-sync" part at the bottom of `schema.sql`. It makes its own private token, so no secret is pasted.
+6. **Check:** on Home press **Sync Depop**. A dry run (`?dry=1`) lists what would change without saving anything.
+
 ## Getting around
 - **Add item:** drag in photos, enter a name, pick a box, and get the SKU to write on the bag.
 - **Mark listed:** enter the price and where it's listed.
