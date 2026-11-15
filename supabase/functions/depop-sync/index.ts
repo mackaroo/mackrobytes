@@ -72,6 +72,14 @@ function soldAtMs(ms) {
   const [y, m, d] = new Intl.DateTimeFormat("en-CA", { timeZone: env("SHOP_TIME_ZONE") || "America/New_York" }).format(new Date(ms)).split("-").map(Number);
   return dayMs(y, m, d);
 }
+// Listed date from Depop's card: "Listed on" if shown, else "Last updated on" (the listing can't be newer than that).
+// Never the sync time, never before the item was added, never in the future.
+function depopListedAt(a, it, now) {
+  const on = a.listedOn || a.updatedOn;
+  if (!on) return now;
+  const [mo, d, y] = on.split("/").map(Number);
+  return Math.min(now, Math.max(dayMs(y, mo, d), it.createdAt || 0));
+}
 const norm = (s) => String(s || "").toLowerCase().replace(/[’']/g, "").replace(/[^a-z0-9]+/g, " ").trim();
 const soldPatch = (it, extra) => {
   const others = platformsOf(it).filter((p) => p !== "depop");
@@ -221,6 +229,7 @@ function checkPayload(p) {
     if (a.sku != null && !SKU.test(a.sku)) bad("active row with a malformed SKU: " + String(a.sku).slice(0, 30));
     if (typeof a.title !== "string") bad("active row without a title");
     if (a.price != null && typeof a.price !== "number") bad("active row price must be a number");
+    for (const f of ["listedOn", "updatedOn"]) if (a[f] != null && !/^\d{2}\/\d{2}\/\d{4}$/.test(a[f])) bad(`active row ${a.sku || a.title.slice(0, 30)}: ${f} must be MM/DD/YYYY`);
   }
   return p;
 }
@@ -284,8 +293,8 @@ async function runBrowser(p, dry) {
     if (!it) { unknown++; continue; }
     const st = statusOf(it), on = platformsOf(it), plats = onDepop(it) ? on : [...on, "depop"];
     if (st === "prep" || st === "ended") {
-      await save(a.sku, { status: "listed", price: a.price != null ? a.price : it.price, platforms: plats, platform: plats[0], listedAt: started, depopTitle: a.title });
-      changes.push(`${a.sku}: marked listed on Depop at ${a.price != null ? "$" + a.price : "no price"}`);
+      await save(a.sku, { status: "listed", price: a.price != null ? a.price : it.price, platforms: plats, platform: plats[0], listedAt: depopListedAt(a, it, started), depopTitle: a.title });
+      changes.push(`${a.sku}: marked listed on Depop at ${a.price != null ? "$" + a.price : "no price"}${a.listedOn ? ", listed " + a.listedOn : a.updatedOn ? ", listed by " + a.updatedOn : ", NO listed date on the Depop card, so today was used: check it"}`);
     } else if (st === "listed" && (!onDepop(it) || it.depopTitle !== a.title)) {
       await save(a.sku, { platforms: plats, platform: it.platform || "depop", depopTitle: a.title, ...(it.price == null && a.price != null ? { price: a.price } : {}) });
       if (!onDepop(it)) changes.push(`${a.sku}: Depop listing linked`);
