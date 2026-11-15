@@ -13,6 +13,7 @@
 !/icon-192.png
 !/icon-512.png
 !/SETUP.md
+!/privacy.html
 !/schema.sql
 !/supabase/
 /supabase/*
@@ -21,6 +22,9 @@
 !/supabase/functions/ebay-sync/
 /supabase/functions/ebay-sync/*
 !/supabase/functions/ebay-sync/index.ts
+!/supabase/functions/depop-sync/
+/supabase/functions/depop-sync/*
+!/supabase/functions/depop-sync/index.ts
 !/.github/
 /.github/*
 !/.github/workflows/
