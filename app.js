@@ -13,6 +13,11 @@ function parseMoney(v) {
   const s = String(v == null ? "" : v).replace(/[$,\s]/g, "");
   return /^(\d+\.?\d*|\.\d+)$/.test(s) ? cents(Number(s)) : null;
 }
+// What a money box shows: "$14.99". Anything unusable stays as typed so the save step can refuse it.
+const moneyBox = v => { const n = parseMoney(v); return n == null ? String(v == null ? "" : v) : money(n); };
+// Tracking numbers are saved without spaces and shown in groups of four (USPS style: 9400 1111 ... 00).
+const cleanTracking = v => String(v == null ? "" : v).replace(/\s+/g, "");
+const showTracking = v => cleanTracking(v).replace(/(.{4})(?=.)/g, "$1 ");
 
 const BOXES = { fragile: "Fragile", hobby: "Hobby & Tech", soft: "Soft & Collectibles" };
 const PLATFORMS = { depop: "Depop", ebay: "eBay", fb: "Facebook" };
@@ -395,7 +400,7 @@ function listView() {
   if (!panel.boosted) panel.boosted = it.boosted ? "yes" : "no";
   return `<h2>Mark listed</h2>${titleLine(it)}<form data-form="list">
     <div class="f">Platforms${platformChecks(on)}</div>
-    <label class="f">Listed price<input id="listPrice" inputmode="decimal" autocomplete="off" placeholder="14.99" value="${it.price != null ? h(it.price) : ""}" autofocus></label>
+    <label class="f">Listed price<input id="listPrice" data-money inputmode="decimal" autocomplete="off" placeholder="$14.99" value="${it.price != null ? h(money(it.price)) : ""}" autofocus></label>
     <p class="warn" id="dupWarn" hidden></p>
     <div class="f">Boosted listing${chips("boosted", YES_NO, panel.boosted)}</div>
     <label class="f">Listed date<input id="listDate" type="datetime-local" value="${timeValue()}"></label>
@@ -438,20 +443,20 @@ function matchesHtml() {
     (panel.showToList ? "" : `<button type="button" class="link" data-act="saleToList">Show items not listed yet</button>`);
 }
 function salePickView() {
-  return `<h2>Record sale</h2><label class="f">Sold for<input id="salePaid" inputmode="decimal" autocomplete="off" placeholder="14.99" value="${h(panel.paid || "")}" autofocus></label><label class="f">Title on receipt<input id="saleTitle" autocomplete="off" placeholder="A few words from the item title" value="${h(panel.title || "")}"></label><div id="matches">${matchesHtml()}</div>`;
+  return `<h2>Record sale</h2><label class="f">Sold for<input id="salePaid" data-money inputmode="decimal" autocomplete="off" placeholder="$14.99" value="${h(moneyBox(panel.paid || ""))}" autofocus></label><label class="f">Title on receipt<input id="saleTitle" autocomplete="off" placeholder="A few words from the item title" value="${h(panel.title || "")}"></label><div id="matches">${matchesHtml()}</div>`;
 }
 function salePayView() {
   const it = S.items[panel.id], paid = panel.paid || (it.paid != null ? it.paid : ""), eb = panel.ebay || {};
   const payout = it.payout != null ? it.payout : eb.payout != null ? eb.payout : "", buyer = it.buyer || eb.buyer || "", soldOn = soldDay(it.soldAt) || soldDay(eb.soldAt) || today();
   return `<h2>${panel.keep ? "Log as bundle" : "Mark sold"}</h2><div class="row flat">${thumb(it)}<div class="grow">${titleLine(it)}<div class="sub">${h(boxName(it))}</div></div></div><form data-form="sale">
-    <label class="f">Sold for<input id="payPaid" inputmode="decimal" autocomplete="off" value="${h(paid)}" ${paid !== "" ? "" : "autofocus"}></label>
+    <label class="f">Sold for<input id="payPaid" data-money inputmode="decimal" autocomplete="off" placeholder="$14.99" value="${h(moneyBox(paid))}" ${paid !== "" ? "" : "autofocus"}></label>
     <div id="bundleBox">${bundleHtml()}</div>
-    <label class="f">Total payout<input id="payOut" inputmode="decimal" autocomplete="off" placeholder="12.70" value="${h(payout)}" ${paid !== "" ? "autofocus" : ""}></label>
+    <label class="f">Total payout<input id="payOut" data-money inputmode="decimal" autocomplete="off" placeholder="$12.70" value="${h(moneyBox(payout))}" ${paid !== "" ? "autofocus" : ""}></label>
     <p class="muted" id="bundleSplit" hidden></p>
     <label class="f">Buyer username<input id="payBuyer" autocomplete="off" autocapitalize="off" spellcheck="false" value="${h(buyer)}"></label>
     <label class="f">Sale date<input id="payDate" type="date" max="${today()}" value="${h(soldOn)}"></label>
     ${slotHtml("receipt")}
-    <label class="f">Tracking number<input id="payTracking" autocomplete="off" autocapitalize="off" spellcheck="false" value="${h(it.tracking || "")}"></label>
+    <label class="f">Tracking number<input id="payTracking" data-tracking autocomplete="off" autocapitalize="off" spellcheck="false" value="${h(showTracking(it.tracking))}"></label>
     ${slotHtml("label")}
     <p class="err" id="payErr" hidden></p>
     <div class="btns"><button class="btn primary" type="submit">${panel.keep ? "Save bundle" : "Mark sold"}</button>${panel.back ? `<button type="button" class="btn" data-act="saleBack">Back</button>` : ""}</div></form>`;
@@ -479,7 +484,7 @@ function bundleHtml() {
   const it = S.items[panel.id];
   if (it.bundleId && it.bundleId !== panel.bundleId) return "";
   const rows = saleBundle().map(sku => { const b = S.items[sku];
-    return `<div class="bundle-item">${titleLine(b)}<label class="f">Sold for<input data-bundle-paid="${h(sku)}" inputmode="decimal" autocomplete="off" placeholder="${b.price == null ? "" : "Listed " + money(b.price)}" value="${h(panel.bundlePaid[sku] != null ? panel.bundlePaid[sku] : "")}"></label><button type="button" class="link danger" data-act="bundleDrop" data-id="${h(sku)}">Remove</button></div>`;
+    return `<div class="bundle-item">${titleLine(b)}<label class="f">Sold for<input data-bundle-paid="${h(sku)}" data-money inputmode="decimal" autocomplete="off" placeholder="${b.price == null ? "" : "Listed " + money(b.price)}" value="${h(moneyBox(panel.bundlePaid[sku] != null ? panel.bundlePaid[sku] : ""))}"></label><button type="button" class="link danger" data-act="bundleDrop" data-id="${h(sku)}">Remove</button></div>`;
   }).join("");
   return rows + (panel.bundlePicking
     ? `<label class="f">Find the bundled item<input id="bundleSearch" autocomplete="off" placeholder="SKU or name" value="${h(panel.bundleQ || "")}"></label><div id="bundleMatches">${bundleMatchesHtml()}</div>`
@@ -522,7 +527,7 @@ async function submitSale() {
   const day = $("#payDate").value;
   if (!day) return fieldErr("payErr", "Pick the sale date first.");
   if (day > today()) return fieldErr("payErr", "The sale date can't be in the future.");
-  const id = panel.id, it = S.items[id], buyer = $("#payBuyer").value.trim() || null, tracking = $("#payTracking").value.trim() || null, eb = panel.ebay;
+  const id = panel.id, it = S.items[id], buyer = $("#payBuyer").value.trim() || null, tracking = cleanTracking($("#payTracking").value) || null, eb = panel.ebay;
   // A sale matched from the eBay or Depop inbox: that site becomes the platform, and the entry leaves the inbox once saved.
   const src = eb && eb.src || "ebay", others = platformsOf(it).filter(p => p !== src);
   const ebayFields = eb ? { platform: src, platforms: [src, ...others], delistOn: others, ...(src === "ebay" ? { ebayOrderId: eb.orderId } : { depopOrderId: eb.id }) } : {};
@@ -582,7 +587,7 @@ function shipView() {
   return `<h2>Mark shipped</h2><div class="row flat">${thumb(it)}<div class="grow">${titleLine(it)}<div class="sub">${h(boxName(it))}</div></div></div>${buyerLine(it)}${also.length ? `<p class="muted">Also ships ${also.map(b => h(b.sku)).join(", ")}</p>` : ""}<form data-form="ship">
     ${bagCheckHtml(it)}
     <label class="f">Ship date<input id="shipDate" type="datetime-local" value="${timeValue()}"></label>
-    <label class="f">Tracking number<input id="shipTracking" autocomplete="off" autocapitalize="off" spellcheck="false" value="${h(it.tracking || "")}"${unchecked(it).length ? "" : " autofocus"}></label>
+    <label class="f">Tracking number<input id="shipTracking" data-tracking autocomplete="off" autocapitalize="off" spellcheck="false" value="${h(showTracking(it.tracking))}"${unchecked(it).length ? "" : " autofocus"}></label>
     ${slotHtml("proof")}
     <p class="err" id="shipErr" hidden></p>
     <button class="btn primary wide" type="submit">Mark shipped</button></form>`;
@@ -591,7 +596,7 @@ async function submitShip() {
   const shippedAt = parseTime($("#shipDate").value);
   if (shippedAt == null) return fieldErr("shipErr", "Pick the ship date first.");
   if (shippedAt > Date.now()) return fieldErr("shipErr", "The ship date can't be in the future.");
-  const id = panel.id, it = S.items[id], back = panel.back, tracking = $("#shipTracking").value.trim() || null, also = bundlePartners(it).filter(b => b.status !== "shipped");
+  const id = panel.id, it = S.items[id], back = panel.back, tracking = cleanTracking($("#shipTracking").value) || null, also = bundlePartners(it).filter(b => b.status !== "shipped");
   const bad = checkBags(it);
   if (bad) return fieldErr("shipErr", bad);
   const now = Date.now();
@@ -613,8 +618,8 @@ function itemView() {
     ${it.driveUrl ? `<a class="link" href="${h(it.driveUrl)}" target="_blank" rel="noopener">Open photos in Google Drive</a>` : ""}
     <label class="f">Name<input data-field="name" autocomplete="off" value="${h(it.name)}"></label>
     <div class="f">Box${chips("itemBox", BOXES, it.box)}</div>
-    <label class="f">Listed price<input data-field="price" inputmode="decimal" autocomplete="off" value="${it.price != null ? h(it.price) : ""}"></label><div class="f">Platforms${platformChecks(platformsOf(it))}</div><div class="f">Boosted listing${chips("itemBoost", YES_NO, it.boosted ? "yes" : "no")}</div><label class="f">Listed date<input data-field="listedAt" type="datetime-local" value="${it.listedAt ? timeValue(it.listedAt) : ""}"></label>
-    <label class="f">Sold for<input data-field="paid" inputmode="decimal" autocomplete="off" value="${it.paid != null ? h(it.paid) : ""}"></label><label class="f">${partners.length ? "Payout share" : "Total payout"}${it.payoutEstimated ? ' <span class="flag" data-est>Estimated</span>' : ""}<input data-field="payout" inputmode="decimal" autocomplete="off" value="${it.payout != null ? h(it.payout) : ""}"></label>${it.payoutEstimated ? '<button type="button" class="link" data-est data-act="confirmPayout">Payout is correct</button>' : ""}<label class="f">Buyer username<input data-field="buyer" autocomplete="off" autocapitalize="off" spellcheck="false" value="${h(it.buyer || "")}"></label><label class="f">Sale date<input data-field="soldAt" type="date" max="${today()}" value="${h(soldDay(it.soldAt))}"></label><label class="f">Tracking number<input data-field="tracking" autocomplete="off" autocapitalize="off" spellcheck="false" value="${h(it.tracking || "")}"></label><label class="f">Ship date<input data-field="shippedAt" type="datetime-local" value="${it.shippedAt ? timeValue(it.shippedAt) : ""}"></label>${partners.length ? `<div class="f">Bundled with<div class="bundle-links">${partners.map(b => `<button type="button" class="link" data-act="openItem" data-id="${h(b.sku)}">${h(b.sku)}</button>`).join("")}</div></div>` : sold ? `<button type="button" class="link" data-act="logBundle">Log as bundle</button>` : ""}
+    <label class="f">Listed price<input data-field="price" data-money inputmode="decimal" autocomplete="off" value="${it.price != null ? h(money(it.price)) : ""}"></label><div class="f">Platforms${platformChecks(platformsOf(it))}</div><div class="f">Boosted listing${chips("itemBoost", YES_NO, it.boosted ? "yes" : "no")}</div><label class="f">Listed date<input data-field="listedAt" type="datetime-local" value="${it.listedAt ? timeValue(it.listedAt) : ""}"></label>
+    <label class="f">Sold for<input data-field="paid" data-money inputmode="decimal" autocomplete="off" value="${it.paid != null ? h(money(it.paid)) : ""}"></label><label class="f">${partners.length ? "Payout share" : "Total payout"}${it.payoutEstimated ? ' <span class="flag" data-est>Estimated</span>' : ""}<input data-field="payout" data-money inputmode="decimal" autocomplete="off" value="${it.payout != null ? h(money(it.payout)) : ""}"></label>${it.payoutEstimated ? '<button type="button" class="link" data-est data-act="confirmPayout">Payout is correct</button>' : ""}<label class="f">Buyer username<input data-field="buyer" autocomplete="off" autocapitalize="off" spellcheck="false" value="${h(it.buyer || "")}"></label><label class="f">Sale date<input data-field="soldAt" type="date" max="${today()}" value="${h(soldDay(it.soldAt))}"></label><label class="f">Tracking number<input data-field="tracking" data-tracking autocomplete="off" autocapitalize="off" spellcheck="false" value="${h(showTracking(it.tracking))}"></label><label class="f">Ship date<input data-field="shippedAt" type="datetime-local" value="${it.shippedAt ? timeValue(it.shippedAt) : ""}"></label>${partners.length ? `<div class="f">Bundled with<div class="bundle-links">${partners.map(b => `<button type="button" class="link" data-act="openItem" data-id="${h(b.sku)}">${h(b.sku)}</button>`).join("")}</div></div>` : sold ? `<button type="button" class="link" data-act="logBundle">Log as bundle</button>` : ""}
     ${Object.keys(RECORDS).map(slotHtml).join("")}
     <p class="err" id="itemErr" hidden></p>
     <button class="link danger" data-act="askDelete" data-id="${id}">Delete item</button>`;
@@ -637,9 +642,14 @@ async function saveField(input) {
     if (v !== it.name) save({ name: v }, it.name);
     return;
   }
-  if (field === "buyer" || field === "tracking") {
+  if (field === "buyer") {
     const v = input.value.trim() || null;
     if (v !== (it[field] || null)) save({ [field]: v }, it[field] || "");
+    return;
+  }
+  if (field === "tracking") {
+    const v = cleanTracking(input.value) || null;
+    if (v !== (it.tracking || null)) save({ tracking: v }, showTracking(it.tracking));
     return;
   }
   if (field === "soldAt") {
@@ -655,9 +665,9 @@ async function saveField(input) {
     return;
   }
   const blank = input.value.trim() === "", v = blank ? null : parseMoney(input.value);
-  if (!blank && v == null) { input.value = it[field] != null ? it[field] : ""; return fieldErr("itemErr", "That amount isn't a number, so it wasn't saved."); }
+  if (!blank && v == null) { input.value = it[field] != null ? money(it[field]) : ""; return fieldErr("itemErr", "That amount isn't a number, so it wasn't saved."); }
   if (v === it[field]) return;
-  const shown = it[field] != null ? it[field] : "", sale = { paid: it.paid, payout: it.payout, [field]: v };
+  const shown = it[field] != null ? money(it[field]) : "", sale = { paid: it.paid, payout: it.payout, [field]: v };
   if (field !== "price" && sale.paid != null && sale.payout != null && sale.payout > sale.paid) { input.value = shown; return fieldErr("itemErr", "The total payout is more than it sold for, so it wasn't saved."); }
   save(field === "payout" ? { payout: v, payoutEstimated: false } : { [field]: v }, shown).then(ok => { if (ok && field === "payout") clearEstimated(); });
 }
@@ -835,7 +845,7 @@ function salesViewHtml() {
     <button class="btn" data-act="salesCsv">Export CSV</button><button class="btn primary" data-act="sale">Record sale</button></div>
     <div class="sheet-wrap"><table class="sheet sales-sheet"><thead id="salesHead"></thead><tbody id="salesBody"></tbody><tfoot id="salesFoot"></tfoot></table></div><p class="muted hint" id="salesNote" hidden></p>`;
 }
-const moneyCell = (it, col, v) => `<td class="${col === "payout" ? "strong" : ""}"><input class="cell${col === "payout" && it.payoutEstimated ? " est" : ""}" data-sheet="${col}" data-id="${h(it.sku)}" inputmode="decimal" autocomplete="off" aria-label="${SALES_COLS[col]}, ${h(it.sku)}" value="${v == null ? "" : Number(v).toFixed(2)}"></td>`;
+const moneyCell = (it, col, v) => `<td class="${col === "payout" ? "strong" : ""}"><input class="cell${col === "payout" && it.payoutEstimated ? " est" : ""}" data-sheet="${col}" data-id="${h(it.sku)}" data-money inputmode="decimal" autocomplete="off" aria-label="${SALES_COLS[col]}, ${h(it.sku)}" value="${v == null ? "" : money(v)}"></td>`;
 function salesRowHtml(it) {
   const id = h(it.sku);
   const platforms = (PLATFORMS[it.platform] ? "" : `<option value="" selected></option>`) + Object.keys(PLATFORMS).map(k => `<option value="${k}"${it.platform === k ? " selected" : ""}>${PLATFORMS[k]}</option>`).join("");
@@ -1046,10 +1056,19 @@ document.addEventListener("input", e => {
   if (id === "listDate") fieldErr("listErr", "");
   if (id === "shipDate") fieldErr("shipErr", "");
   if (id === "payPaid" || id === "payOut" || id === "payDate") fieldErr("payErr", "");
+  if ("tracking" in e.target.dataset) groupTracking(e.target);
   if (id === "bundleSearch") { panel.bundleQ = e.target.value; $("#bundleMatches").innerHTML = bundleMatchesHtml(); }
   if (e.target.dataset.bundlePaid) { panel.bundlePaid[e.target.dataset.bundlePaid] = e.target.value; fieldErr("payErr", ""); }
   if (id === "payPaid" || id === "payOut" || e.target.dataset.bundlePaid) showBundleSplit();
 });
+// Regroups as you type or paste, keeping the cursor after the same character.
+function groupTracking(el) {
+  const at = cleanTracking(el.value.slice(0, el.selectionStart)).length, v = showTracking(el.value);
+  if (v === el.value) return;
+  el.value = v; const pos = at + Math.floor(Math.max(at - 1, 0) / 4); el.setSelectionRange(pos, pos);
+}
+// Leaving a money box shows it as $5.00; an unusable amount stays as typed so saving can refuse it.
+document.addEventListener("focusout", e => { if (e.target.dataset && "money" in e.target.dataset && parseMoney(e.target.value) != null) e.target.value = moneyBox(e.target.value); });
 // Leaving a box tidies what was typed (5 becomes 5.00) and puts back anything unusable.
 document.addEventListener("focusout", e => { if (e.target.dataset && (e.target.dataset.calc || e.target.dataset.fee)) { e.target.classList.remove("bad"); drawFees(); } });
 document.addEventListener("change", e => {
