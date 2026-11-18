@@ -3,7 +3,7 @@
 // every route below checks its own secret instead). No secrets live in this file: they are function secrets.
 //
 // Depop has no seller API for small shops, so this reads two things you already have, and never writes to Depop:
-//   1. Gmail (read-only): Depop's "sale confirmation" emails → Listed → Sold within ~15 minutes, matched by title + price.
+//   1. Gmail (read-only): Depop's sale emails (old "…sale confirmation for @buyer." and new "You’ve made a sale on Depop! …for @buyer") → Listed → Sold within ~15 minutes, matched by title + price.
 //   2. Selling Hub pages, read by a scheduled Claude task in your own Chrome and posted here as JSON
 //      → Sold / Shipped / Listed / Ended by exact SKU.
 //
@@ -127,14 +127,15 @@ function bodyText(part) {
   return "";
 }
 
-// Reads one "Your USPS shipping label and sale confirmation for @buyer." email. Throws if the layout changed,
+// Reads one Depop sale email ("Your USPS shipping label and sale confirmation for @buyer." or, from Nov 2026,
+// "You’ve made a sale on Depop! Here’s your USPS shipping label for @buyer"). Throws if the layout changed,
 // so a Depop redesign shows up as a sync error instead of wrong sales.
 function parseSaleEmail(subject, body) {
   const buyerM = subject.match(/for @([A-Za-z0-9._-]*[A-Za-z0-9_-])/); // the subject ends in "."
   if (!buyerM) throw new Error("Depop sale email without a buyer in the subject: " + subject.slice(0, 80));
-  const lines = body.replace(/\(\s*https?:[^)]*\)/g, " ").split(/\r?\n/).map((l) => l.replace(/[͏­​-‍﻿]/g, "").replace(/\s+/g, " ").trim()).filter(Boolean);
-  const start = lines.findIndex((l) => /^Order details$/i.test(l)), end = lines.findIndex((l, i) => i > start && /^Ship to$/i.test(l));
-  if (start < 0 || end < 0) throw new Error("Depop changed its sale email (no Order details / Ship to). Nothing was changed.");
+  const lines = body.replace(/\(\s*https?:[^)]*\)/g, " ").split(/\r?\n/).map((l) => l.replace(/[͏­​-‍﻿]/g, "").replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n))).replace(/&amp;/g, "&").replace(/\s+/g, " ").trim()).filter(Boolean);
+  const start = lines.findIndex((l) => /^(Order|Sale) details$/i.test(l)), end = lines.findIndex((l, i) => i > start && /^Ship to$/i.test(l));
+  if (start < 0 || end < 0) throw new Error("Depop changed its sale email (no Order/Sale details / Ship to). Nothing was changed.");
   const items = [];
   for (let i = start + 1; i < end; i++) {
     const pm = lines[i + 1] && lines[i + 1].match(/^\$\s?([\d,]+\.\d{2})$/);
@@ -165,7 +166,8 @@ async function runEmail(dry) {
   const started = Date.now(), changes = [], run = await loadRun(), { state } = run;
   const since = state.emailCursor ? state.emailCursor - OVERLAP_MS : started - FIRST_RUN_DAYS * 86400000;
   const token = await gmailToken();
-  const q = `from:sold@alerts.depop.com subject:"sale confirmation" after:${Math.floor(since / 1000)}`;
+  // Every email from this sender is read; ones that aren't sales are listed in changes, so a new subject never hides sales.
+  const q = `from:sold@alerts.depop.com after:${Math.floor(since / 1000)}`;
   const ids = [];
   for (let pageToken = ""; ;) {
     const page = await gmailGet(GMAIL + "?" + new URLSearchParams({ q, maxResults: "100", ...(pageToken ? { pageToken } : {}) }), token);
@@ -184,6 +186,7 @@ async function runEmail(dry) {
   msgs.sort((a, b) => Number(a.internalDate) - Number(b.internalDate));
   for (const m of msgs) {
     const subject = ((m.payload.headers || []).find((x) => x.name.toLowerCase() === "subject") || {}).value || "";
+    if (!/for @[A-Za-z0-9._-]/.test(subject)) { changes.push(`Skipped a Depop email that isn't a sale: "${subject.slice(0, 80)}"`); state.seen["mail-" + m.id] = started; continue; }
     const sale = parseSaleEmail(subject, bodyText(m.payload));
     const soldAt = soldAtMs(Number(m.internalDate)), shares = splitPayout(sale.payout, sale.items.map((x) => x.paid));
     const matched = [];

@@ -50,7 +50,7 @@ One-time setup (Function URL = `https://vjxoovvddupxzxmxrspl.supabase.co/functio
 
 ## 5. Depop auto-sync (optional)
 Depop has no seller API, so MackroBytes reads two things you already have. **Nothing is ever changed on Depop.**
-- **Gmail, every 15 minutes (read-only access):** a "sale confirmation" email moves the matching Listed Depop item to Sold, with Sold for, payout, buyer and sale date. Emails carry no SKU, so it matches on the Depop title and price. It only acts when exactly one item fits, and the rest go to "Depop sales to check" on Home.
+- **Gmail, every 15 minutes (read-only access):** a Depop sale email (old or new format) moves the matching Listed Depop item to Sold, with Sold for, payout, buyer and sale date. Emails carry no SKU, so it matches on the Depop title and price. It only acts when exactly one item fits, and the rest go to "Depop sales to check" on Home.
 - **Selling Hub, 9am and 6pm (read-only browser check):** a scheduled Claude task opens your Sold and Active Selling Hub pages in Chrome and only reads them. Using each listing's SKU it moves items to Sold, Shipped (when Depop says shipped), Listed (Prep/Ended to Listed) and Ended (gone from Depop without a sale, and only when the whole Active list was read).
   - It only opens those two pages. It never clicks, types or runs scripts, and it stops at any sign-in or captcha.
   - It runs only while the Mac is awake with Chrome and the Claude app open. A missed run is caught up on the next one.
