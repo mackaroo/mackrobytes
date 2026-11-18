@@ -241,7 +241,6 @@ function rowSub(it) {
   if (isSold(it)) parts.push(it.buyer ? "To " + h(it.buyer) : it.status === "shipped" ? "No buyer" : flag("Needs buyer"));
   if (it.status === "prep" && !(it.photos || []).length && !it.driveUrl) parts.push(flag("Needs photos"));
   if (it.status === "ended") parts.push(flag("Ended unsold"));
-  if (it.autoShipped && !it.packCheckedAt && isSold(it)) parts.push(flag("Bag not checked"));
   if (it.status === "listed") parts.push(it.price == null ? flag("Needs price") : `${money(it.price)} · ${h(platformNames(it) || "No platform")}`);
   if ((it.delistOn || []).length) parts.push(flag("Delist on " + it.delistOn.map(p => PLATFORMS[p] || p).join(", ")));
   if (isSold(it)) parts.push(it.payout == null ? flag("Needs payout") : `${it.paid == null ? flag("Needs sold price") : "Sold for " + money(it.paid)} · ${it.payoutEstimated ? "Estimated payout" : "Payout"} ${money(it.payout)}${bundlePartners(it).length ? " · Bundle" : ""}`);
@@ -339,8 +338,8 @@ let panel = null;
 function openPanel(p) { panel = p; drawPanel(); $("#scrim").hidden = false; const f = $("#panel [autofocus]"); if (f) f.focus(); }
 function closePanel() { panel = null; $("#scrim").hidden = true; $("#panel").innerHTML = ""; }
 function drawPanel() {
-  const views = { add: addView, created: createdView, list: listView, salePick: salePickView, salePay: salePayView, saleDone: saleDoneView, pack: packView, ship: shipView, record: recordView, item: itemView, confirm: confirmView, settings: settingsView, ebayInbox: syncInboxView };
-  $("#panel").classList.toggle("pop", ["list", "salePay", "pack", "ship"].includes(panel.view));
+  const views = { add: addView, created: createdView, list: listView, salePick: salePickView, salePay: salePayView, saleDone: saleDoneView, ship: shipView, record: recordView, item: itemView, confirm: confirmView, settings: settingsView, ebayInbox: syncInboxView };
+  $("#panel").classList.toggle("pop", ["list", "salePay", "ship"].includes(panel.view));
   $("#panel").innerHTML = `<button class="x" data-act="close" aria-label="Close">×</button>` + (panel.id && !S.items[panel.id] ? `<p class="err">That item no longer exists.</p>` : views[panel.view]());
 }
 const fieldErr = (id, msg) => { const e = $("#" + id); if (e) { e.textContent = msg || ""; e.hidden = !msg; } };
@@ -576,24 +575,6 @@ function checkBags(it) {
   return null;
 }
 
-/* Bag check on its own (for items eBay already moved to Shipped, or before you buy the label). Status stays as it is. */
-function packView() {
-  const it = S.items[panel.id], also = unchecked(it).filter(b => b.sku !== it.sku);
-  return `<h2>Bag check</h2><div class="row flat">${thumb(it)}<div class="grow">${titleLine(it)}<div class="sub">${h(boxName(it))}</div></div></div>${buyerLine(it)}${also.length ? `<p class="muted">Also checks ${also.map(b => h(b.sku)).join(", ")}</p>` : ""}<form data-form="pack">
-    ${bagCheckHtml(it)}
-    <p class="err" id="packErr" hidden></p>
-    <button class="btn primary wide" type="submit">Bag checked</button></form>`;
-}
-async function submitPack() {
-  const id = panel.id, it = S.items[id], back = panel.back, bad = checkBags(it);
-  if (bad) return fieldErr("packErr", bad);
-  const now = Date.now(), also = unchecked(it).filter(b => b.sku !== id);
-  if (!it.packCheckedAt && !await savePopup({ packCheckedAt: now })) return;
-  await Promise.all(also.map(b => patchItem(b.sku, { packCheckedAt: now })));
-  if (back) openItem(id); else closePanel();
-  toast(id + (also.length ? " and its bundle are checked" : " is checked"));
-}
-
 /* Mark shipped */
 function shipView() {
   const it = S.items[panel.id];
@@ -627,7 +608,6 @@ function itemView() {
   return `<div class="sku">${id}</div>
     <div class="f status">Status<div class="chips">${Object.keys(STATUSES).map(k => `<button type="button" class="chip${it.status === k ? " on" : ""}" data-act="setStatus" data-v="${k}">${h(STATUSES[k])}</button>`).join("")}</div></div>
     ${(it.delistOn || []).length ? `<p class="warn">Sold on eBay. Delist it on ${h(it.delistOn.map(p => PLATFORMS[p] || p).join(", "))}. <button type="button" class="link" data-act="delisted">Delisted</button></p>` : ""}
-    ${sold && (it.status === "sold" || it.autoShipped) && unchecked(it).length ? `<p class="warn">Bag not checked yet. <button type="button" class="link" data-act="checkBag">Check bag</button></p>` : ""}
     <div id="photoStrip">${photoStripHtml(it)}</div>
     <button type="button" class="drop small" id="drop" data-act="pickFiles">Drag photos here<small>or click to choose</small></button>
     ${it.driveUrl ? `<a class="link" href="${h(it.driveUrl)}" target="_blank" rel="noopener">Open photos in Google Drive</a>` : ""}
@@ -976,7 +956,6 @@ const actions = {
   syncNow: t => syncNow(t.dataset.src),
   syncDismiss: async t => { if (await dropInboxEntry(t.dataset.v, t.dataset.src) && panel && panel.view === "ebayInbox") drawPanel(); },
   syncMatch: t => { const src = t.dataset.src, x = syncInbox(src).find(e => e.id === t.dataset.v); if (x) openPanel({ view: "salePick", paid: x.paid != null ? String(x.paid) : "", title: x.title || "", ebay: { ...x, src } }); },
-  checkBag: () => openPanel({ view: "pack", id: panel.id, back: true }),
   delisted: async () => { if (await patchItem(panel.id, { delistOn: [] })) openItem(panel.id); },
   saleBack: () => openPanel({ view: "salePick", ...panel.back }),
   saleToList: () => { panel.showToList = true; $("#matches").innerHTML = matchesHtml(); },
@@ -1050,7 +1029,7 @@ document.addEventListener("keydown", e => {
 window.addEventListener("resize", closeStatusMenu);
 document.addEventListener("submit", e => {
   e.preventDefault();
-  const fn = { add: submitAdd, list: submitList, sale: submitSale, pack: submitPack, ship: submitShip }[e.target.dataset.form]; if (fn) fn();
+  const fn = { add: submitAdd, list: submitList, sale: submitSale, ship: submitShip }[e.target.dataset.form]; if (fn) fn();
 });
 document.addEventListener("input", e => {
   const id = e.target.id;

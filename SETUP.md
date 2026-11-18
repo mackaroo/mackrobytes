@@ -32,7 +32,7 @@ You sign in once per device. After that, everything stays in sync.
 Every 15 minutes eBay moves items forward through the 5 statuses (Prep → Listed → Sold → Shipped, or Listed → Ended). Each item moves once per eBay listing or order, so a status you change by hand stays as you set it.
 - **Listed:** a live eBay listing with the SKU moves a Prep or Ended item to Listed, with its price and start date.
 - **Sold:** a paid order fills in Sold for, payout, buyer and sale date.
-- **Shipped:** once eBay has the label or tracking, the item moves to Shipped with its tracking number. eBay counts a bought label as shipped. Until you tick it, the row says "Bag not checked": open the item and press **Check bag**.
+- **Shipped:** once eBay has the label or tracking, the item moves to Shipped with its tracking number. eBay counts a bought label as shipped.
 - **Ended:** a listing that ends unsold moves the item to Ended. If the item is also on Depop or Facebook, only eBay is removed and the item stays Listed.
 - **Put the SKU on every eBay listing**, in eBay's *Custom label (SKU)* field. Sales without a known SKU show as "eBay sales to match" on Home.
 - Cancelled or refunded orders are flagged on Home and never undone automatically.
