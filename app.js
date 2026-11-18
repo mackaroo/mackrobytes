@@ -388,7 +388,7 @@ async function submitAdd() {
 }
 function createdView() {
   const it = S.items[panel.id];
-  return `<p class="muted">Write this on the bag</p><div class="bigsku">${h(it.sku)}</div><p class="name">${h(it.name)}</p><p class="muted">Goes in ${h(boxName(it))}</p>
+  return `<p class="muted">Write this on the bag</p><div class="bigsku">${h(it.sku)}${copyBtn(it.sku)}</div><p class="name">${h(it.name)}</p><p class="muted">Goes in ${h(boxName(it))}</p>
     <div class="btns"><button class="btn primary" data-act="openList" data-id="${h(it.sku)}" autofocus>Mark listed</button><button class="btn" data-act="close">List it later</button></div>`;
 }
 
@@ -607,10 +607,12 @@ async function submitShip() {
   toast(id + (also.length ? " and its bundle are shipped" : " is shipped"));
 }
 
+const copyBtn = sku => `<button type="button" class="copy" data-act="copySku" data-id="${h(sku)}" title="Copy SKU" aria-label="Copy SKU ${h(sku)}"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg></button>`;
+
 /* Item page */
 function itemView() {
   const it = S.items[panel.id], id = h(it.sku), sold = isSold(it), partners = bundlePartners(it);
-  return `<div class="sku">${id}</div>
+  return `<div class="sku">${id}${copyBtn(it.sku)}</div>
     <div class="f status">Status<div class="chips">${Object.keys(STATUSES).map(k => `<button type="button" class="chip${it.status === k ? " on" : ""}" data-act="setStatus" data-v="${k}">${h(STATUSES[k])}</button>`).join("")}</div></div>
     ${(it.delistOn || []).length ? `<p class="warn">Sold on eBay. Delist it on ${h(it.delistOn.map(p => PLATFORMS[p] || p).join(", "))}. <button type="button" class="link" data-act="delisted">Delisted</button></p>` : ""}
     <div id="photoStrip">${photoStripHtml(it)}</div>
@@ -966,6 +968,10 @@ const actions = {
   syncNow: t => syncNow(t.dataset.src),
   syncDismiss: async t => { if (await dropInboxEntry(t.dataset.v, t.dataset.src) && panel && panel.view === "ebayInbox") drawPanel(); },
   syncMatch: t => { const src = t.dataset.src, x = syncInbox(src).find(e => e.id === t.dataset.v); if (x) openPanel({ view: "salePick", paid: x.paid != null ? String(x.paid) : "", title: x.title || "", ebay: { ...x, src } }); },
+  copySku: async t => {
+    try { await navigator.clipboard.writeText(t.dataset.id); toast("Copied " + t.dataset.id); }
+    catch (e) { console.error("Copy failed", e); toast("Couldn't copy the SKU.", { err: true }); }
+  },
   delisted: async () => { if (await patchItem(panel.id, { delistOn: [] })) openItem(panel.id); },
   saleBack: () => openPanel({ view: "salePick", ...panel.back }),
   saleToList: () => { panel.showToList = true; $("#matches").innerHTML = matchesHtml(); },

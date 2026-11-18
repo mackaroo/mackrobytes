@@ -215,3 +215,7 @@ select.cell { min-width: 118px; cursor: pointer; }
 .inbox-row { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; padding: 10px 0; border-top: 1px solid var(--line); }
 .inbox-row .grow { flex: 1 1 220px; min-width: 0; }
 .inbox-row .btns { margin: 0; }
+.copy { background: none; border: 0; padding: 4px; margin-left: 6px; color: var(--muted); cursor: pointer; vertical-align: middle; border-radius: 6px; line-height: 0; }
+.copy:hover { color: inherit; background: rgba(127,127,127,.15); }
+.copy svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.bigsku .copy svg { width: 24px; height: 24px; }
